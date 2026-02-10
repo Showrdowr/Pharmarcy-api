@@ -1,0 +1,1038 @@
+# 📚 แผนการสร้าง Backend API สำหรับ Pharmacy Academy
+
+แผนการพัฒนา Backend API ตั้งแต่เริ่มต้นจนพร้อมทดสอบ โดยใช้ **Fastify + TypeScript + Drizzle ORM + PostgreSQL**
+
+---
+
+## 🎯 ภาพรวมของ Tech Stack
+
+| Component     | Technology                  |
+| ------------- | --------------------------- |
+| Runtime       | Node.js                     |
+| Language      | TypeScript                  |
+| Framework     | Fastify                     |
+| ORM           | Drizzle ORM                 |
+| Database      | PostgreSQL (Docker)         |
+| Validation    | Zod + Fastify Type Provider |
+| Documentation | Swagger/OpenAPI             |
+| Testing       | Vitest + Supertest          |
+
+---
+
+## 📋 สารบัญขั้นตอน
+
+1. [Project Initialization](#1-project-initialization)
+2. [Docker Setup](#2-docker-setup)
+3. [Database & ORM Setup](#3-database--orm-setup)
+4. [Server Architecture](#4-server-architecture)
+5. [Modular Structure](#5-modular-structure)
+6. [Validation](#6-validation)
+7. [API Documentation](#7-api-documentation)
+8. [Testing](#8-testing)
+
+---
+
+## 1. Project Initialization ✅
+
+### 1.1 สร้างโปรเจกต์และ Initialize npm
+
+```bash
+# สร้างโฟลเดอร์โปรเจกต์
+mkdir pharmacy-api
+cd pharmacy-api
+
+# Initialize npm project
+npm init -y
+```
+
+### 1.2 ติดตั้ง Dependencies
+
+#### Production Dependencies
+
+```bash
+npm install fastify @fastify/cors @fastify/swagger @fastify/swagger-ui
+npm install drizzle-orm postgres
+npm install zod
+npm install dotenv
+npm install pino pino-pretty
+```
+
+#### Development Dependencies
+
+```bash
+npm install -D typescript @types/node tsx
+npm install -D drizzle-kit
+npm install -D vitest supertest @types/supertest
+npm install -D eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser
+npm install -D prettier
+```
+
+### 1.3 สร้าง [tsconfig.json](file:///c:/Pharmacy_Academy/pharmacy_academy-api/tsconfig.json)
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+### 1.4 อัปเดต [package.json](file:///c:/Pharmacy_Academy/pharmacy_academy-api/package.json) Scripts
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
+  }
+}
+```
+
+---
+
+## 2. Docker Setup ✅
+
+### 2.1 ใช้ [docker-compose.yml](file:///c:/Pharmacy_Academy/docker-compose.yml) ที่มีอยู่
+
+โปรเจกต์มี [docker-compose.yml](file:///c:/Pharmacy_Academy/docker-compose.yml) พร้อมใช้งานแล้วที่ [c:\Pharmacy_Academy\docker-compose.yml](file:///c:/Pharmacy_Academy/docker-compose.yml):
+
+```yaml
+version: "3.8"
+
+services:
+  pharmarcy_academy:
+    image: postgres
+    container_name: pharmarcy_academy
+    environment:
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "5432:5432"
+    restart: always
+    volumes:
+      - pharmarcy_academy_data:/var/lib/postgresql/data
+
+volumes:
+  pharmarcy_academy_data:
+```
+
+### 2.2 สร้าง [.env](file:///c:/Pharmacy_Academy/pharmacy_academy-api/.env) และ [.env.example](file:///c:/Pharmacy_Academy/pharmacy_academy-api/.env.example)
+
+**[.env.example](file:///c:/Pharmacy_Academy/pharmacy_academy-api/.env.example):**
+
+```env
+# Database
+DATABASE_URL=postgresql://postgres:1234@localhost:5432/pharmacy_academy
+
+# Server
+PORT=3000
+HOST=0.0.0.0
+NODE_ENV=development
+
+# Logging
+LOG_LEVEL=info
+```
+
+### 2.3 คำสั่งรัน Docker
+
+```bash
+# Start PostgreSQL container
+docker-compose up -d
+
+# ตรวจสอบ container กำลังทำงาน
+docker ps
+
+# สร้าง database (ถ้ายังไม่มี)
+docker exec -it pharmarcy_academy psql -U postgres -c "CREATE DATABASE pharmacy_academy;"
+```
+
+---
+
+## 3. Database & ORM Setup
+
+### 3.1 โครงสร้างไฟล์ Database
+
+```
+src/
+├── db/
+│   ├── index.ts          # Database connection
+│   ├── schema/
+│   │   ├── index.ts      # Export all schemas
+│   │   ├── users.ts      # User schema
+│   │   └── courses.ts    # Course schema (ตัวอย่าง)
+│   └── migrations/       # Migration files
+```
+
+### 3.2 สร้าง `drizzle.config.ts`
+
+```typescript
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  schema: "./src/db/schema/index.ts",
+  out: "./src/db/migrations",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL!,
+  },
+  verbose: true,
+  strict: true,
+});
+```
+
+### 3.3 สร้าง Database Connection (`src/db/index.ts`)
+
+```typescript
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "./schema";
+
+const connectionString = process.env.DATABASE_URL!;
+
+const client = postgres(connectionString);
+export const db = drizzle(client, { schema });
+
+export type Database = typeof db;
+```
+
+### 3.4 ตัวอย่าง Schema (`src/db/schema/users.ts`)
+
+```typescript
+import {
+  pgTable,
+  uuid,
+  varchar,
+  timestamp,
+  boolean,
+} from "drizzle-orm/pg-core";
+
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  firstName: varchar("first_name", { length: 100 }),
+  lastName: varchar("last_name", { length: 100 }),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+```
+
+### 3.5 Migration Workflow
+
+```bash
+# Generate migration จาก schema
+npm run db:generate
+
+# Apply migration ไปยัง database
+npm run db:migrate
+
+# หรือใช้ push สำหรับ development (sync โดยตรง)
+npm run db:push
+
+# เปิด Drizzle Studio เพื่อดู database
+npm run db:studio
+```
+
+---
+
+## 4. Server Architecture
+
+### 4.1 โครงสร้างหลัก
+
+```
+src/
+├── index.ts              # Entry point
+├── app.ts                # Fastify instance & plugins
+├── config/
+│   └── env.ts            # Environment variables
+├── plugins/
+│   ├── cors.ts           # CORS configuration
+│   ├── swagger.ts        # Swagger/OpenAPI
+│   └── error-handler.ts  # Global error handler
+└── lib/
+    └── logger.ts         # Custom logger
+```
+
+### 4.2 สร้าง Environment Config (`src/config/env.ts`)
+
+```typescript
+import { z } from "zod";
+import "dotenv/config";
+
+const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().default(3000),
+  HOST: z.string().default("0.0.0.0"),
+  NODE_ENV: z
+    .enum(["development", "production", "test"])
+    .default("development"),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace"])
+    .default("info"),
+});
+
+export const env = envSchema.parse(process.env);
+export type Env = z.infer<typeof envSchema>;
+```
+
+### 4.3 สร้าง Fastify App (`src/app.ts`)
+
+```typescript
+import Fastify, { FastifyInstance } from "fastify";
+import cors from "@fastify/cors";
+import { env } from "./config/env";
+import { registerSwagger } from "./plugins/swagger";
+import { errorHandler } from "./plugins/error-handler";
+
+export async function buildApp(): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: {
+      level: env.LOG_LEVEL,
+      transport:
+        env.NODE_ENV === "development"
+          ? { target: "pino-pretty", options: { colorize: true } }
+          : undefined,
+    },
+  });
+
+  // Register plugins
+  await app.register(cors, { origin: true });
+  await registerSwagger(app);
+
+  // Global error handler
+  app.setErrorHandler(errorHandler);
+
+  // Health check
+  app.get("/health", async () => ({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+  }));
+
+  // Register routes (จะเพิ่มในส่วน Modular Structure)
+  // await app.register(routes, { prefix: '/api/v1' });
+
+  return app;
+}
+```
+
+### 4.4 สร้าง Entry Point (`src/index.ts`)
+
+```typescript
+import { buildApp } from "./app";
+import { env } from "./config/env";
+
+async function main() {
+  const app = await buildApp();
+
+  try {
+    await app.listen({ port: env.PORT, host: env.HOST });
+    console.log(`🚀 Server running at http://${env.HOST}:${env.PORT}`);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
+}
+
+main();
+```
+
+### 4.5 Global Error Handler (`src/plugins/error-handler.ts`)
+
+```typescript
+import { FastifyError, FastifyReply, FastifyRequest } from "fastify";
+import { ZodError } from "zod";
+
+export function errorHandler(
+  error: FastifyError,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  request.log.error(error);
+
+  // Zod validation error
+  if (error instanceof ZodError) {
+    return reply.status(400).send({
+      statusCode: 400,
+      error: "Validation Error",
+      message: "Invalid request data",
+      details: error.errors,
+    });
+  }
+
+  // Fastify validation error
+  if (error.validation) {
+    return reply.status(400).send({
+      statusCode: 400,
+      error: "Validation Error",
+      message: error.message,
+    });
+  }
+
+  // Default error
+  const statusCode = error.statusCode || 500;
+  return reply.status(statusCode).send({
+    statusCode,
+    error: error.name || "Internal Server Error",
+    message: error.message || "An unexpected error occurred",
+  });
+}
+```
+
+---
+
+## 5. Modular Structure
+
+### 5.1 Feature-Based Architecture
+
+```
+src/
+├── features/
+│   ├── users/
+│   │   ├── user.routes.ts      # Route definitions
+│   │   ├── user.controller.ts  # Request handlers
+│   │   ├── user.service.ts     # Business logic
+│   │   ├── user.repository.ts  # Database operations
+│   │   ├── user.schema.ts      # Zod validation schemas
+│   │   └── user.types.ts       # TypeScript types
+│   │
+│   ├── courses/
+│   │   ├── course.routes.ts
+│   │   ├── course.controller.ts
+│   │   ├── course.service.ts
+│   │   ├── course.repository.ts
+│   │   ├── course.schema.ts
+│   │   └── course.types.ts
+│   │
+│   └── auth/
+│       ├── auth.routes.ts
+│       ├── auth.controller.ts
+│       ├── auth.service.ts
+│       └── auth.schema.ts
+│
+├── routes/
+│   └── index.ts              # Register all feature routes
+│
+└── shared/
+    ├── types/
+    │   └── index.ts          # Shared types
+    └── utils/
+        └── index.ts          # Utility functions
+```
+
+### 5.2 ตัวอย่าง User Feature
+
+#### `src/features/users/user.schema.ts`
+
+```typescript
+import { z } from "zod";
+
+export const createUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+});
+
+export const updateUserSchema = createUserSchema
+  .partial()
+  .omit({ password: true });
+
+export const userParamsSchema = z.object({
+  id: z.string().uuid(),
+});
+
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+```
+
+#### `src/features/users/user.repository.ts`
+
+```typescript
+import { eq } from "drizzle-orm";
+import { db } from "../../db";
+import { users, NewUser, User } from "../../db/schema/users";
+
+export const userRepository = {
+  async findAll(): Promise<User[]> {
+    return db.select().from(users);
+  },
+
+  async findById(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  },
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  },
+
+  async create(data: NewUser): Promise<User> {
+    const [user] = await db.insert(users).values(data).returning();
+    return user;
+  },
+
+  async update(id: string, data: Partial<NewUser>): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id));
+    return result.rowCount > 0;
+  },
+};
+```
+
+#### `src/features/users/user.service.ts`
+
+```typescript
+import { CreateUserInput, UpdateUserInput } from "./user.schema";
+import { userRepository } from "./user.repository";
+import { hash } from "bcrypt"; // npm install bcrypt @types/bcrypt
+
+export const userService = {
+  async getAllUsers() {
+    return userRepository.findAll();
+  },
+
+  async getUserById(id: string) {
+    const user = await userRepository.findById(id);
+    if (!user) throw new Error("User not found");
+    return user;
+  },
+
+  async createUser(input: CreateUserInput) {
+    const existing = await userRepository.findByEmail(input.email);
+    if (existing) throw new Error("Email already exists");
+
+    const passwordHash = await hash(input.password, 10);
+    return userRepository.create({
+      email: input.email,
+      passwordHash,
+      firstName: input.firstName,
+      lastName: input.lastName,
+    });
+  },
+
+  async updateUser(id: string, input: UpdateUserInput) {
+    const user = await userRepository.update(id, input);
+    if (!user) throw new Error("User not found");
+    return user;
+  },
+
+  async deleteUser(id: string) {
+    const deleted = await userRepository.delete(id);
+    if (!deleted) throw new Error("User not found");
+    return { success: true };
+  },
+};
+```
+
+#### `src/features/users/user.controller.ts`
+
+```typescript
+import { FastifyRequest, FastifyReply } from "fastify";
+import { userService } from "./user.service";
+import { CreateUserInput, UpdateUserInput } from "./user.schema";
+
+export const userController = {
+  async getAll(request: FastifyRequest, reply: FastifyReply) {
+    const users = await userService.getAllUsers();
+    return reply.send(users);
+  },
+
+  async getById(
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) {
+    const user = await userService.getUserById(request.params.id);
+    return reply.send(user);
+  },
+
+  async create(
+    request: FastifyRequest<{ Body: CreateUserInput }>,
+    reply: FastifyReply,
+  ) {
+    const user = await userService.createUser(request.body);
+    return reply.status(201).send(user);
+  },
+
+  async update(
+    request: FastifyRequest<{ Params: { id: string }; Body: UpdateUserInput }>,
+    reply: FastifyReply,
+  ) {
+    const user = await userService.updateUser(request.params.id, request.body);
+    return reply.send(user);
+  },
+
+  async delete(
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) {
+    await userService.deleteUser(request.params.id);
+    return reply.status(204).send();
+  },
+};
+```
+
+#### `src/features/users/user.routes.ts`
+
+```typescript
+import { FastifyInstance } from "fastify";
+import { userController } from "./user.controller";
+import {
+  createUserSchema,
+  updateUserSchema,
+  userParamsSchema,
+} from "./user.schema";
+import { zodToJsonSchema } from "zod-to-json-schema";
+
+export async function userRoutes(app: FastifyInstance) {
+  app.get("/users", {
+    schema: {
+      tags: ["Users"],
+      summary: "Get all users",
+      response: { 200: { type: "array" } },
+    },
+    handler: userController.getAll,
+  });
+
+  app.get("/users/:id", {
+    schema: {
+      tags: ["Users"],
+      summary: "Get user by ID",
+      params: zodToJsonSchema(userParamsSchema),
+    },
+    handler: userController.getById,
+  });
+
+  app.post("/users", {
+    schema: {
+      tags: ["Users"],
+      summary: "Create a new user",
+      body: zodToJsonSchema(createUserSchema),
+    },
+    handler: userController.create,
+  });
+
+  app.put("/users/:id", {
+    schema: {
+      tags: ["Users"],
+      summary: "Update a user",
+      params: zodToJsonSchema(userParamsSchema),
+      body: zodToJsonSchema(updateUserSchema),
+    },
+    handler: userController.update,
+  });
+
+  app.delete("/users/:id", {
+    schema: {
+      tags: ["Users"],
+      summary: "Delete a user",
+      params: zodToJsonSchema(userParamsSchema),
+    },
+    handler: userController.delete,
+  });
+}
+```
+
+---
+
+## 6. Validation
+
+### 6.1 การใช้ Zod กับ Fastify
+
+ติดตั้ง `zod-to-json-schema` เพื่อแปลง Zod schema เป็น JSON Schema สำหรับ Fastify:
+
+```bash
+npm install zod-to-json-schema
+```
+
+### 6.2 ตัวอย่าง Validation Schema
+
+```typescript
+// src/features/courses/course.schema.ts
+import { z } from "zod";
+
+export const createCourseSchema = z.object({
+  title: z.string().min(1).max(255),
+  description: z.string().optional(),
+  price: z.number().positive(),
+  duration: z.number().int().positive(), // in minutes
+  instructorId: z.string().uuid(),
+  isPublished: z.boolean().default(false),
+  tags: z.array(z.string()).optional(),
+});
+
+export const queryCoursesSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  search: z.string().optional(),
+  sortBy: z.enum(["createdAt", "title", "price"]).default("createdAt"),
+  order: z.enum(["asc", "desc"]).default("desc"),
+});
+```
+
+### 6.3 Prevalidation Hook (Optional)
+
+```typescript
+// src/plugins/zod-validator.ts
+import { FastifyInstance } from "fastify";
+import { ZodSchema } from "zod";
+
+export function preValidationHook(app: FastifyInstance) {
+  app.addHook("preValidation", async (request, reply) => {
+    const { zodSchema } = request.routeOptions.config as {
+      zodSchema?: ZodSchema;
+    };
+
+    if (zodSchema && request.body) {
+      const result = zodSchema.safeParse(request.body);
+      if (!result.success) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: "Validation Error",
+          details: result.error.errors,
+        });
+      }
+      request.body = result.data;
+    }
+  });
+}
+```
+
+---
+
+## 7. API Documentation
+
+### 7.1 Swagger Plugin (`src/plugins/swagger.ts`)
+
+```typescript
+import { FastifyInstance } from "fastify";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+
+export async function registerSwagger(app: FastifyInstance) {
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: "Pharmacy Academy API",
+        description: "Backend API for Pharmacy Academy Learning Platform",
+        version: "1.0.0",
+      },
+      servers: [
+        { url: "http://localhost:3000", description: "Development server" },
+      ],
+      tags: [
+        { name: "Users", description: "User management endpoints" },
+        { name: "Courses", description: "Course management endpoints" },
+        { name: "Auth", description: "Authentication endpoints" },
+      ],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+          },
+        },
+      },
+    },
+  });
+
+  await app.register(swaggerUi, {
+    routePrefix: "/docs",
+    uiConfig: {
+      docExpansion: "list",
+      deepLinking: true,
+    },
+  });
+}
+```
+
+### 7.2 เข้าถึง API Documentation
+
+หลังจากรันเซิร์ฟเวอร์:
+
+- **Swagger UI**: http://localhost:3000/docs
+- **OpenAPI JSON**: http://localhost:3000/docs/json
+
+---
+
+## 8. Testing
+
+### 8.1 ติดตั้ง Testing Dependencies
+
+```bash
+npm install -D vitest supertest @types/supertest
+```
+
+### 8.2 สร้าง Vitest Config (`vitest.config.ts`)
+
+```typescript
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+    },
+  },
+});
+```
+
+### 8.3 ตัวอย่าง Unit Test
+
+```typescript
+// src/features/users/user.service.test.ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { userService } from "./user.service";
+import { userRepository } from "./user.repository";
+
+vi.mock("./user.repository");
+
+describe("UserService", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("getUserById", () => {
+    it("should return user when found", async () => {
+      const mockUser = { id: "123", email: "test@example.com" };
+      vi.mocked(userRepository.findById).mockResolvedValue(mockUser as any);
+
+      const result = await userService.getUserById("123");
+
+      expect(result).toEqual(mockUser);
+      expect(userRepository.findById).toHaveBeenCalledWith("123");
+    });
+
+    it("should throw error when user not found", async () => {
+      vi.mocked(userRepository.findById).mockResolvedValue(undefined);
+
+      await expect(userService.getUserById("123")).rejects.toThrow(
+        "User not found",
+      );
+    });
+  });
+});
+```
+
+### 8.4 ตัวอย่าง Integration Test
+
+```typescript
+// src/features/users/user.routes.test.ts
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { buildApp } from "../../app";
+import { FastifyInstance } from "fastify";
+
+describe("User Routes", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  describe("GET /health", () => {
+    it("should return health status", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/health",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toHaveProperty("status", "ok");
+    });
+  });
+
+  describe("GET /api/v1/users", () => {
+    it("should return list of users", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/users",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(Array.isArray(JSON.parse(response.body))).toBe(true);
+    });
+  });
+});
+```
+
+### 8.5 รันเทส
+
+```bash
+# รันเทสครั้งเดียว
+npm run test:run
+
+# รันเทสแบบ watch mode
+npm test
+
+# รันเทสพร้อม coverage
+npm run test:run -- --coverage
+```
+
+---
+
+## 📁 โครงสร้างโปรเจกต์สุดท้าย
+
+```
+pharmacy-api/
+├── docker-compose.yml
+├── package.json
+├── tsconfig.json
+├── drizzle.config.ts
+├── vitest.config.ts
+├── .env
+├── .env.example
+├── .gitignore
+│
+└── src/
+    ├── index.ts                 # Entry point
+    ├── app.ts                   # Fastify app builder
+    │
+    ├── config/
+    │   └── env.ts               # Environment config
+    │
+    ├── db/
+    │   ├── index.ts             # Database connection
+    │   ├── schema/
+    │   │   ├── index.ts
+    │   │   ├── users.ts
+    │   │   └── courses.ts
+    │   └── migrations/
+    │
+    ├── plugins/
+    │   ├── cors.ts
+    │   ├── swagger.ts
+    │   └── error-handler.ts
+    │
+    ├── features/
+    │   ├── users/
+    │   │   ├── user.routes.ts
+    │   │   ├── user.controller.ts
+    │   │   ├── user.service.ts
+    │   │   ├── user.repository.ts
+    │   │   ├── user.schema.ts
+    │   │   ├── user.types.ts
+    │   │   └── user.service.test.ts
+    │   │
+    │   ├── courses/
+    │   │   └── ...
+    │   │
+    │   └── auth/
+    │       └── ...
+    │
+    ├── routes/
+    │   └── index.ts             # Route registration
+    │
+    └── shared/
+        ├── types/
+        └── utils/
+```
+
+---
+
+## ✅ Checklist สำหรับการทดสอบ
+
+### Manual Testing (Postman/Thunder Client)
+
+1. [ ] Health Check: `GET http://localhost:3000/health`
+2. [ ] Swagger UI: เปิด http://localhost:3000/docs
+3. [ ] Create User: `POST /api/v1/users`
+4. [ ] Get All Users: `GET /api/v1/users`
+5. [ ] Get User by ID: `GET /api/v1/users/:id`
+6. [ ] Update User: `PUT /api/v1/users/:id`
+7. [ ] Delete User: `DELETE /api/v1/users/:id`
+
+### Automated Testing
+
+```bash
+# รัน unit tests
+npm run test:run
+
+# ตรวจสอบ TypeScript
+npm run build
+
+# ตรวจสอบ linting
+npm run lint
+```
+
+---
+
+## 🚀 คำสั่งเริ่มต้นใช้งาน
+
+```bash
+# 1. Start database
+docker-compose up -d
+
+# 2. Create database
+docker exec -it pharmarcy_academy psql -U postgres -c "CREATE DATABASE pharmacy_academy;"
+
+# 3. Push schema to database
+npm run db:push
+
+# 4. Start development server
+npm run dev
+
+# 5. Open Swagger UI
+# เปิด browser ไปที่ http://localhost:3000/docs
+```
+
+---
+
+## 📝 หมายเหตุ
+
+> [!IMPORTANT]
+> แผนนี้เป็น Backend-only workflow ยังไม่รวม Frontend integration
+
+> [!TIP]
+> แนะนำให้ใช้ Postman หรือ Thunder Client (VS Code Extension) สำหรับทดสอบ API
+
+> [!NOTE]
+> สามารถเพิ่ม Features ใหม่ได้ตาม pattern ใน `src/features/` โดยแต่ละ feature มี routes, controller, service, repository, schema

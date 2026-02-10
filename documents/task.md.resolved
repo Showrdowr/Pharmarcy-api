@@ -1,0 +1,57 @@
+# Backend API Development - Pharmacy Academy
+
+## Progress Tracker
+
+### 1. Project Initialization ✅
+
+- [x] สร้างโฟลเดอร์โปรเจกต์ `pharmacy-api`
+- [x] สร้าง [package.json](file:///c:/Pharmacy_Academy/pharmacy_academy-api/package.json)
+- [x] ติดตั้ง Production Dependencies
+- [x] ติดตั้ง Development Dependencies
+- [x] สร้าง [tsconfig.json](file:///c:/Pharmacy_Academy/pharmacy_academy-api/tsconfig.json)
+
+### 2. Docker Setup ✅
+
+- [x] ตรวจสอบ docker-compose.yml
+- [x] สร้าง [.env](file:///c:/Pharmacy_Academy/pharmacy_academy-api/.env) และ [.env.example](file:///c:/Pharmacy_Academy/pharmacy_academy-api/.env.example)
+- [x] รัน Docker container
+
+### 3. Database & ORM Setup ⏳
+
+- [/] สร้าง `drizzle.config.ts`
+- [ ] สร้าง Database connection (`src/db/index.ts`)
+- [ ] สร้าง User schema
+- [ ] รัน migration
+
+### 4. Server Architecture
+
+- [ ] สร้าง Environment config
+- [ ] สร้าง Fastify app
+- [ ] สร้าง Entry point
+- [ ] สร้าง Error handler
+
+### 5. Modular Structure
+
+- [ ] สร้างโครงสร้าง features/users
+- [ ] สร้าง user.schema.ts
+- [ ] สร้าง user.repository.ts
+- [ ] สร้าง user.service.ts
+- [ ] สร้าง user.controller.ts
+- [ ] สร้าง user.routes.ts
+- [ ] Register routes
+
+### 6. Validation
+
+- [ ] ติดตั้ง zod-to-json-schema
+- [ ] เพิ่ม validation ใน routes
+
+### 7. API Documentation
+
+- [ ] สร้าง Swagger plugin
+- [ ] ทดสอบ Swagger UI
+
+### 8. Testing
+
+- [ ] สร้าง vitest.config.ts
+- [ ] สร้าง unit tests
+- [ ] สร้าง integration tests
