@@ -12,7 +12,7 @@ export const userService = {
     return userRepository.findAll();
   },
 
-  async getUserById(id: string) {
+  async getUserById(id: number) {
     const user = await userRepository.findById(id);
     if (!user) {
       throw Object.assign(new Error('User not found'), { statusCode: 404 });
@@ -30,12 +30,11 @@ export const userService = {
     return userRepository.create({
       email: input.email,
       passwordHash,
-      firstName: input.firstName,
-      lastName: input.lastName,
+      fullName: input.fullName,
     });
   },
 
-  async updateUser(id: string, input: UpdateUserInput) {
+  async updateUser(id: number, input: UpdateUserInput) {
     const user = await userRepository.update(id, input);
     if (!user) {
       throw Object.assign(new Error('User not found'), { statusCode: 404 });
@@ -43,7 +42,7 @@ export const userService = {
     return user;
   },
 
-  async deleteUser(id: string) {
+  async deleteUser(id: number) {
     const deleted = await userRepository.delete(id);
     if (!deleted) {
       throw Object.assign(new Error('User not found'), { statusCode: 404 });

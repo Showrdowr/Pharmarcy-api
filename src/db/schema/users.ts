@@ -1,12 +1,15 @@
-import { pgTable, uuid, varchar, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+
+// สร้าง enum ให้ตรงกับ DB
+export const userRoleEnum = pgEnum('user_role', ['member', 'pharmacist', 'admin']);
 
 export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: serial('id').primaryKey(),
+  fullName: varchar('full_name', { length: 255 }),
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: varchar('password_hash', { length: 255 }).notNull(),
-  firstName: varchar('first_name', { length: 100 }),
-  lastName: varchar('last_name', { length: 100 }),
-  isActive: boolean('is_active').default(true),
+  role: userRoleEnum('role').notNull().default('member'),
+  professionalLicenseNumber: varchar('professional_license_number', { length: 100 }),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

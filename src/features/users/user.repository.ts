@@ -7,7 +7,7 @@ export const userRepository = {
     return db.select().from(users);
   },
 
-  async findById(id: string): Promise<User | undefined> {
+  async findById(id: number): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   },
@@ -22,16 +22,16 @@ export const userRepository = {
     return user;
   },
 
-  async update(id: string, data: Partial<NewUser>): Promise<User | undefined> {
+  async update(id: number, data: Partial<NewUser>): Promise<User | undefined> {
     const [user] = await db
       .update(users)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data })
       .where(eq(users.id, id))
       .returning();
     return user;
   },
 
-  async delete(id: string): Promise<boolean> {
+  async delete(id: number): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, id));
     return (result.count ?? 0) > 0;
   },

@@ -3,7 +3,13 @@ import cors from '@fastify/cors';
 import { env } from './config/env.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { errorHandler } from './plugins/error-handler.js';
+import { registerJwt } from './plugins/jwt.js';
 import { registerRoutes } from './routes/index.js';
+import {
+  serializerCompiler,
+  validatorCompiler,
+  ZodTypeProvider,
+} from 'fastify-type-provider-zod';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -16,9 +22,18 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
 
+  // Log incoming requests
+  app.addHook('onRequest', async (request) => {
+    request.log.info({ url: request.url, method: request.method }, 'Incoming request');
+  });
+
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
   // Register plugins
   await app.register(cors, { origin: true });
   await registerSwagger(app);
+  await registerJwt(app);
 
   // Global error handler
   app.setErrorHandler(errorHandler);
