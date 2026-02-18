@@ -6,23 +6,30 @@ export const authService = {
   async login(data: LoginInput) {
     const user = await userRepository.findByEmail(data.email);
     if (!user) {
-      throw Object.assign(new Error('User not found'), { statusCode: 401 });
+      throw Object.assign(new Error('เข้าสู่ระบบล้มเหลว'), { statusCode: 401 });
     }
 
     const isValid = await bcrypt.compare(data.password, user.passwordHash);
     if (!isValid) {
-      throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+      throw Object.assign(new Error('เข้าสู่ระบบล้มเหลว'), { statusCode: 401 });
     }
 
     return user;
   },
 
   async register(data: RegisterInput) {
-    console.log('Checking if email exists:', data.email);
-    const existing = await userRepository.findByEmail(data.email);
-    if (existing) {
-      console.log('Email already exists:', data.email);
-      throw Object.assign(new Error('Email already exists'), { statusCode: 409 });
+    console.log('Checking for existing user:', { email: data.email, fullName: data.fullName });
+    
+    // Check Full Name
+    const existingName = await userRepository.findByFullName(data.fullName);
+    if (existingName) {
+      throw Object.assign(new Error('สมัครสมาชิกล้มเหลว:ชื่อซ้ำ'), { statusCode: 409 });
+    }
+
+    // Check Email
+    const existingEmail = await userRepository.findByEmail(data.email);
+    if (existingEmail) {
+      throw Object.assign(new Error('สมัครสมาชิกล้มเหลว:อีเมลซ้ำ'), { statusCode: 409 });
     }
 
     console.log('Hashing password...');

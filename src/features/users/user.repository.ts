@@ -17,6 +17,11 @@ export const userRepository = {
     return user;
   },
 
+  async findByFullName(fullName: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.fullName, fullName));
+    return user;
+  },
+
   async create(data: NewUser): Promise<User> {
     const [user] = await db.insert(users).values(data).returning();
     return user;
