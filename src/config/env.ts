@@ -13,6 +13,8 @@ const envSchema = z.object({
     .default('info'),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('7d'),
+  SMTP_USER: z.string().email().optional(),
+  SMTP_PASS: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

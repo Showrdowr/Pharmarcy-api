@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, jsonb, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, jsonb, primaryKey, integer } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // =============================================
@@ -9,6 +9,8 @@ export const adminUser = pgTable('admin_user', {
   username: varchar('username', { length: 100 }).notNull().unique(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: text('password_hash').notNull(),
+  failedAttempts: integer('failed_attempts').default(0),
+  lastFailedAt: timestamp('last_failed_at'),
   createAt: timestamp('create_at').defaultNow(),
   updateAt: timestamp('update_at').defaultNow(),
 });
