@@ -15,6 +15,7 @@ export const authController = {
     reply: FastifyReply
   ) {
     const { email, password, captchaAnswer, captchaToken } = request.body;
+    console.log('DEBUG: User Login Attempt:', { email, captchaAnswer, hasToken: !!captchaToken });
 
     // 1. Find user first to check failed attempts
     const user = await userRepository.findByEmail(email);
