@@ -4,6 +4,8 @@ import { z } from 'zod';
 export const adminLoginSchema = z.object({
   email: z.string().email('กรุณากรอกอีเมลที่ถูกต้อง'),
   password: z.string().min(6, 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'),
+  captchaAnswer: z.string().optional(),
+  captchaToken: z.string().optional(),
 });
 
 export type AdminLoginInput = z.infer<typeof adminLoginSchema>;

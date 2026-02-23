@@ -14,6 +14,15 @@ export async function adminAuthRoutes(app: FastifyInstance) {
     handler: adminAuthController.login,
   });
 
+  // Get Captcha
+  app.get('/admin/auth/captcha', {
+    schema: {
+      tags: ['Admin Auth'],
+      summary: 'Get CAPTCHA for login',
+    },
+    handler: adminAuthController.getCaptcha,
+  });
+
   // Get current admin user info
   app.get('/admin/auth/me', {
     onRequest: [app.authenticate],
