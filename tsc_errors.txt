@@ -1,0 +1,1 @@
+﻿test-puzzle.ts(1,35): error TS2307: Cannot find module './src/features/common/puzzle-captcha.js' or its corresponding type declarations.
