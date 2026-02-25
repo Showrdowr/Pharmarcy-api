@@ -10,7 +10,19 @@ export const questionTypeEnum = pgEnum('question_type', ['MULTIPLE_CHOICE', 'TRU
 export const categories = pgTable('categories', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
-  parentId: integer('parent_id'),
+  description: text('description'),
+  color: varchar('color', { length: 50 }),
+});
+
+// Subcategories table
+export const subcategories = pgTable('subcategories', {
+  id: serial('id').primaryKey(),
+  categoryId: integer('category_id')
+    .notNull()
+    .references(() => categories.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  color: varchar('color', { length: 50 }),
 });
 
 // Videos table
@@ -26,7 +38,8 @@ export const videos = pgTable('videos', {
 // Courses table
 export const courses = pgTable('courses', {
   id: serial('id').primaryKey(),
-  categoryId: integer('category_id').references(() => categories.id),
+  categoryId: integer('category_id').references(() => categories.id, { onDelete: 'set null' }),
+  subcategoryId: integer('subcategory_id').references(() => subcategories.id, { onDelete: 'set null' }),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
   authorName: varchar('author_name', { length: 255 }),
@@ -63,20 +76,31 @@ export const videoQuestions = pgTable('video_questions', {
 });
 
 // Relations
-export const categoriesRelations = relations(categories, ({ one, many }) => ({
-  parent: one(categories, {
-    fields: [categories.parentId],
-    references: [categories.id],
-    relationName: 'subcategories',
-  }),
-  subcategories: many(categories, { relationName: 'subcategories' }),
+export const categoriesRelations = relations(categories, ({ many }) => ({
+  subcategories: many(subcategories),
   courses: many(courses),
 }));
+
+export const subcategoriesRelations = relations(subcategories, ({ one, many }) => ({
+  category: one(categories, {
+    fields: [subcategories.categoryId],
+    references: [categories.id],
+  }),
+  courses: many(courses),
+}));
+
+// Course Tags removal
+
+// Course Tags Junction removal
 
 export const coursesRelations = relations(courses, ({ one, many }) => ({
   category: one(categories, {
     fields: [courses.categoryId],
     references: [categories.id],
+  }),
+  subcategory: one(subcategories, {
+    fields: [courses.subcategoryId],
+    references: [subcategories.id],
   }),
   previewVideo: one(videos, {
     fields: [courses.previewVideoId],
