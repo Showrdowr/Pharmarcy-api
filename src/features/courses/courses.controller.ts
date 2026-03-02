@@ -25,12 +25,14 @@ export const coursesController = {
   },
 
   async createCategory(request: FastifyRequest<{ Body: CreateCategoryInput }>, reply: FastifyReply) {
-    const category = await coursesService.createCategory(request.body);
+    const adminId = (request.user as any)?.id;
+    const category = await coursesService.createCategory(request.body, adminId, request.ip);
     return reply.status(201).send({ data: category });
   },
 
   async updateCategory(request: FastifyRequest<{ Params: { id: number }; Body: UpdateCategoryInput }>, reply: FastifyReply) {
-    const category = await coursesService.updateCategory(request.params.id, request.body);
+    const adminId = (request.user as any)?.id;
+    const category = await coursesService.updateCategory(request.params.id, request.body, adminId, request.ip);
     if (!category) {
       return reply.status(404).send({ message: 'Category not found' });
     }
@@ -38,7 +40,8 @@ export const coursesController = {
   },
 
   async deleteCategory(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const result = await coursesService.deleteCategory(request.params.id);
+    const adminId = (request.user as any)?.id;
+    const result = await coursesService.deleteCategory(request.params.id, adminId, request.ip);
     if (!result) {
       return reply.status(404).send({ message: 'Category not found' });
     }
@@ -61,12 +64,14 @@ export const coursesController = {
   },
 
   async createSubcategory(request: FastifyRequest<{ Body: CreateSubcategoryInput }>, reply: FastifyReply) {
-    const subcategory = await coursesService.createSubcategory(request.body);
+    const adminId = (request.user as any)?.id;
+    const subcategory = await coursesService.createSubcategory(request.body, adminId, request.ip);
     return reply.status(201).send({ data: subcategory });
   },
 
   async updateSubcategory(request: FastifyRequest<{ Params: { id: number }; Body: UpdateSubcategoryInput }>, reply: FastifyReply) {
-    const subcategory = await coursesService.updateSubcategory(request.params.id, request.body);
+    const adminId = (request.user as any)?.id;
+    const subcategory = await coursesService.updateSubcategory(request.params.id, request.body, adminId, request.ip);
     if (!subcategory) {
       return reply.status(404).send({ message: 'Subcategory not found' });
     }
@@ -74,7 +79,8 @@ export const coursesController = {
   },
 
   async deleteSubcategory(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const result = await coursesService.deleteSubcategory(request.params.id);
+    const adminId = (request.user as any)?.id;
+    const result = await coursesService.deleteSubcategory(request.params.id, adminId, request.ip);
     if (!result) {
       return reply.status(404).send({ message: 'Subcategory not found' });
     }
@@ -96,12 +102,14 @@ export const coursesController = {
   },
 
   async createCourse(request: FastifyRequest<{ Body: CreateCourseInput }>, reply: FastifyReply) {
-    const course = await coursesService.createCourse(request.body);
+    const adminId = (request.user as any)?.id;
+    const course = await coursesService.createCourse(request.body, adminId, request.ip);
     return reply.status(201).send({ data: course });
   },
 
   async updateCourse(request: FastifyRequest<{ Params: { id: number }; Body: UpdateCourseInput }>, reply: FastifyReply) {
-    const course = await coursesService.updateCourse(request.params.id, request.body);
+    const adminId = (request.user as any)?.id;
+    const course = await coursesService.updateCourse(request.params.id, request.body, adminId, request.ip);
     if (!course) {
       return reply.status(404).send({ message: 'Course not found' });
     }
@@ -109,7 +117,8 @@ export const coursesController = {
   },
 
   async deleteCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const result = await coursesService.deleteCourse(request.params.id);
+    const adminId = (request.user as any)?.id;
+    const result = await coursesService.deleteCourse(request.params.id, adminId, request.ip);
     if (!result) {
       return reply.status(404).send({ message: 'Course not found' });
     }

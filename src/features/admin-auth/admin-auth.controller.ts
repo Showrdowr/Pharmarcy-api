@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { adminAuthService } from './admin-auth.service.js';
 import { adminAuthRepository } from './admin-auth.repository.js';
+import { adminLoginLogsService } from '../admin-login-logs/admin-login-logs.service.js';
 import { AdminLoginInput, AdminTokenPayload } from './admin-auth.schema.js';
 import { captchaUtil } from '../common/captcha.js';
 import bcrypt from 'bcrypt';
@@ -54,6 +55,14 @@ export const adminAuthController = {
         // Increment failed attempts
         await adminAuthRepository.incrementFailedAttempts(admin.id);
         
+        // Record FAILED login
+        void adminLoginLogsService.recordLogin({
+          adminId: admin.id,
+          status: 'FAILED',
+          ipAddress: request.ip,
+          userAgent: request.headers['user-agent']
+        });
+
         const newFailedAttempts = admin.failedAttempts + 1;
         return reply.status(401).send({
           success: false,
@@ -67,6 +76,14 @@ export const adminAuthController = {
       if (admin.failedAttempts > 0) {
         await adminAuthRepository.resetFailedAttempts(admin.id);
       }
+
+      // Record SUCCESS login
+      void adminLoginLogsService.recordLogin({
+        adminId: admin.id,
+        status: 'SUCCESS',
+        ipAddress: request.ip,
+        userAgent: request.headers['user-agent']
+      });
 
       const token = request.server.jwt.sign({
         id: admin.id,
