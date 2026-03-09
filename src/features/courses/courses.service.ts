@@ -1,4 +1,5 @@
 import { coursesRepository } from './courses.repository.js';
+import { auditLogsService } from '../audit-logs/audit-logs.service.js';
 import type { 
   CreateCategoryInput, 
   UpdateCategoryInput,
@@ -18,16 +19,49 @@ export const coursesService = {
     return await coursesRepository.getCategoryById(id);
   },
 
-  async createCategory(data: CreateCategoryInput) {
-    return await coursesRepository.createCategory(data);
+  async createCategory(data: CreateCategoryInput, adminId?: string, ipAddress?: string) {
+    const category = await coursesRepository.createCategory(data);
+    if (adminId) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'CREATE_CATEGORY',
+        targetTable: 'categories',
+        newValue: category,
+        ipAddress,
+      });
+    }
+    return category;
   },
 
-  async updateCategory(id: number, data: UpdateCategoryInput) {
-    return await coursesRepository.updateCategory(id, data);
+  async updateCategory(id: number, data: UpdateCategoryInput, adminId?: string, ipAddress?: string) {
+    const oldCategory = await coursesRepository.getCategoryById(id);
+    const category = await coursesRepository.updateCategory(id, data);
+    if (adminId && category) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'UPDATE_CATEGORY',
+        targetTable: 'categories',
+        oldValue: oldCategory,
+        newValue: category,
+        ipAddress,
+      });
+    }
+    return category;
   },
 
-  async deleteCategory(id: number) {
-    return await coursesRepository.deleteCategory(id);
+  async deleteCategory(id: number, adminId?: string, ipAddress?: string) {
+    const oldCategory = await coursesRepository.getCategoryById(id);
+    const result = await coursesRepository.deleteCategory(id);
+    if (adminId && result) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'DELETE_CATEGORY',
+        targetTable: 'categories',
+        oldValue: oldCategory,
+        ipAddress,
+      });
+    }
+    return result;
   },
 
   // Subcategory logic
@@ -39,16 +73,49 @@ export const coursesService = {
     return await coursesRepository.getSubcategoryById(id);
   },
 
-  async createSubcategory(data: CreateSubcategoryInput) {
-    return await coursesRepository.createSubcategory(data);
+  async createSubcategory(data: CreateSubcategoryInput, adminId?: string, ipAddress?: string) {
+    const subcategory = await coursesRepository.createSubcategory(data);
+    if (adminId) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'CREATE_SUBCATEGORY',
+        targetTable: 'subcategories',
+        newValue: subcategory,
+        ipAddress,
+      });
+    }
+    return subcategory;
   },
 
-  async updateSubcategory(id: number, data: UpdateSubcategoryInput) {
-    return await coursesRepository.updateSubcategory(id, data);
+  async updateSubcategory(id: number, data: UpdateSubcategoryInput, adminId?: string, ipAddress?: string) {
+    const oldSubcategory = await coursesRepository.getSubcategoryById(id);
+    const subcategory = await coursesRepository.updateSubcategory(id, data);
+    if (adminId && subcategory) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'UPDATE_SUBCATEGORY',
+        targetTable: 'subcategories',
+        oldValue: oldSubcategory,
+        newValue: subcategory,
+        ipAddress,
+      });
+    }
+    return subcategory;
   },
 
-  async deleteSubcategory(id: number) {
-    return await coursesRepository.deleteSubcategory(id);
+  async deleteSubcategory(id: number, adminId?: string, ipAddress?: string) {
+    const oldSubcategory = await coursesRepository.getSubcategoryById(id);
+    const result = await coursesRepository.deleteSubcategory(id);
+    if (adminId && result) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'DELETE_SUBCATEGORY',
+        targetTable: 'subcategories',
+        oldValue: oldSubcategory,
+        ipAddress,
+      });
+    }
+    return result;
   },
 
   // Course logic
@@ -60,15 +127,48 @@ export const coursesService = {
     return await coursesRepository.getCourseById(id);
   },
 
-  async createCourse(data: CreateCourseInput) {
-    return await coursesRepository.createCourse(data);
+  async createCourse(data: CreateCourseInput, adminId?: string, ipAddress?: string) {
+    const course = await coursesRepository.createCourse(data);
+    if (adminId) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'CREATE_COURSE',
+        targetTable: 'courses',
+        newValue: course,
+        ipAddress,
+      });
+    }
+    return course;
   },
 
-  async updateCourse(id: number, data: UpdateCourseInput) {
-    return await coursesRepository.updateCourse(id, data);
+  async updateCourse(id: number, data: UpdateCourseInput, adminId?: string, ipAddress?: string) {
+    const oldCourse = await coursesRepository.getCourseById(id);
+    const course = await coursesRepository.updateCourse(id, data);
+    if (adminId && course) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'UPDATE_COURSE',
+        targetTable: 'courses',
+        oldValue: oldCourse,
+        newValue: course,
+        ipAddress,
+      });
+    }
+    return course;
   },
 
-  async deleteCourse(id: number) {
-    return await coursesRepository.deleteCourse(id);
+  async deleteCourse(id: number, adminId?: string, ipAddress?: string) {
+    const oldCourse = await coursesRepository.getCourseById(id);
+    const result = await coursesRepository.deleteCourse(id);
+    if (adminId && result) {
+      void auditLogsService.recordAction({
+        adminId,
+        action: 'DELETE_COURSE',
+        targetTable: 'courses',
+        oldValue: oldCourse,
+        ipAddress,
+      });
+    }
+    return result;
   },
 };

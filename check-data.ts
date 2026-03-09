@@ -12,10 +12,24 @@ const sql = postgres(connectionString as string);
 async function main() {
   console.log('Connecting to:', connectionString);
   try {
-    const result = await sql`SELECT id, email, created_at, updated_at FROM users LIMIT 5`;
-    console.log('Data in users table:');
+    const result = await sql`SELECT id, email, role, failed_attempts, created_at FROM users`;
+    console.log(`Total users in DB: ${result.length}`);
+    console.log('User Details:');
     result.forEach((row: any) => {
-      console.log(`- ID: ${row.id}, Email: ${row.email}, Created: ${row.created_at}, Updated: ${row.updated_at}`);
+      console.log(`- ID: ${row.id}, Email: ${row.email}, Role: ${row.role}, Failed: ${row.failed_attempts}, Created: ${row.created_at}`);
+    });
+
+    const roleCounts = await sql`SELECT role, count(*) as count FROM users GROUP BY role`;
+    console.log('\nRole Distribution:');
+    roleCounts.forEach((row: any) => {
+      console.log(`- ${row.role}: ${row.count}`);
+    });
+
+    // New query to select role and failed_attempts
+    const roleFailedAttempts = await sql`SELECT role, failed_attempts FROM users`;
+    console.log('\nRole and Failed Attempts:');
+    roleFailedAttempts.forEach((row: any) => {
+      console.log(`- Role: ${row.role}, Failed Attempts: ${row.failed_attempts}`);
     });
     
     if (result.length === 0) {

@@ -8,8 +8,10 @@ function hashPassword(password: string): string {
 }
 
 export const userService = {
-  async getAllUsers() {
-    return userRepository.findAll();
+  async getAllUsers(filters: { role?: any; limit?: number; offset?: number; search?: string; status?: 'active' | 'inactive' } = {}) {
+    const users = await userRepository.findAllWithFilters(filters);
+    const stats = await userRepository.getStats(filters.role, filters.search, filters.status);
+    return { users, stats };
   },
 
   async getUserById(id: number) {

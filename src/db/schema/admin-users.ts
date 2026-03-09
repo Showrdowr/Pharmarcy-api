@@ -67,7 +67,19 @@ export const adminAuditLogs = pgTable('admin_audit_logs', {
   oldValue: jsonb('old_value'),
   newValue: jsonb('new_value'),
   ipAddress: varchar('ip_address', { length: 100 }),
-  createAt: timestamp('create_at').defaultNow(),
+  createAt: timestamp('create_at', { mode: 'string' }).defaultNow(),
+});
+
+// =============================================
+// Admin Login Logs table
+// =============================================
+export const adminLoginLogs = pgTable('admin_login_logs', {
+  id: uuid('id').primaryKey(),
+  adminId: uuid('admin_id').references(() => adminUser.id, { onDelete: 'cascade' }),
+  status: varchar('status', { length: 20 }).notNull(), // 'SUCCESS', 'FAILED'
+  ipAddress: varchar('ip_address', { length: 100 }),
+  userAgent: text('user_agent'),
+  createAt: timestamp('create_at', { mode: 'string' }).defaultNow(),
 });
 
 // =============================================
@@ -76,6 +88,7 @@ export const adminAuditLogs = pgTable('admin_audit_logs', {
 export const adminUserRelations = relations(adminUser, ({ many }) => ({
   roles: many(adminUserRoles),
   auditLogs: many(adminAuditLogs),
+  loginLogs: many(adminLoginLogs),
 }));
 
 export const rolesRelations = relations(roles, ({ many }) => ({
@@ -112,6 +125,13 @@ export const rolePermissionsRelations = relations(rolePermissions, ({ one }) => 
 export const adminAuditLogsRelations = relations(adminAuditLogs, ({ one }) => ({
   admin: one(adminUser, {
     fields: [adminAuditLogs.adminId],
+    references: [adminUser.id],
+  }),
+}));
+
+export const adminLoginLogsRelations = relations(adminLoginLogs, ({ one }) => ({
+  admin: one(adminUser, {
+    fields: [adminLoginLogs.adminId],
     references: [adminUser.id],
   }),
 }));
