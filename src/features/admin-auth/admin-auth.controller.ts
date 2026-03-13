@@ -90,8 +90,10 @@ export const adminAuthController = {
         email: admin.email,
         username: admin.username,
         role: admin.role,
-        isAdmin: true,
+        isAdmin: admin.role === 'admin' || admin.role === 'super_admin',
       });
+
+      const majorSequence = admin.major ? await adminAuthRepository.getMajorSequence(admin.id, admin.major) : '01';
 
       return reply.send({
         success: true,
@@ -100,6 +102,9 @@ export const adminAuthController = {
           username: admin.username,
           email: admin.email,
           role: admin.role,
+          department: admin.department,
+          major: admin.major,
+          majorSequence,
         },
         token,
       });
@@ -131,6 +136,8 @@ export const adminAuthController = {
       return reply.status(404).send({ success: false, error: 'Admin user not found' });
     }
 
+    const majorSequence = admin.major ? await adminAuthRepository.getMajorSequence(admin.id, admin.major) : '01';
+
     return reply.send({
       success: true,
       user: {
@@ -138,6 +145,9 @@ export const adminAuthController = {
         username: admin.username,
         email: admin.email,
         role: admin.role,
+        department: admin.department,
+        major: admin.major,
+        majorSequence,
       },
     });
   },

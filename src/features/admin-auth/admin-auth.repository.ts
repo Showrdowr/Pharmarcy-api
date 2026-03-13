@@ -15,6 +15,8 @@ export const adminAuthRepository = {
         passwordHash: adminUser.passwordHash,
         failedAttempts: adminUser.failedAttempts,
         lastFailedAt: adminUser.lastFailedAt,
+        department: adminUser.department,
+        major: adminUser.major,
         createAt: adminUser.createAt,
         updateAt: adminUser.updateAt,
         roleName: roles.name,
@@ -34,6 +36,8 @@ export const adminAuthRepository = {
       passwordHash: result[0].passwordHash,
       failedAttempts: result[0].failedAttempts || 0,
       lastFailedAt: result[0].lastFailedAt,
+      department: result[0].department,
+      major: result[0].major,
       role: result[0].roleName || 'officer',
       createAt: result[0].createAt,
       updateAt: result[0].updateAt,
@@ -75,6 +79,8 @@ export const adminAuthRepository = {
         id: adminUser.id,
         username: adminUser.username,
         email: adminUser.email,
+        department: adminUser.department,
+        major: adminUser.major,
         createAt: adminUser.createAt,
         updateAt: adminUser.updateAt,
         roleName: roles.name,
@@ -91,9 +97,33 @@ export const adminAuthRepository = {
       id: result[0].id,
       username: result[0].username,
       email: result[0].email,
+      department: result[0].department,
+      major: result[0].major,
       role: result[0].roleName || 'officer',
       createAt: result[0].createAt,
       updateAt: result[0].updateAt,
     };
+  },
+
+  /**
+   * Get the sequence number for an admin user within their major
+   * based on their registration date (createAt)
+   */
+  async getMajorSequence(adminId: string, major: string) {
+    if (!major) return '01';
+
+    // Count users with same major who registered before or at the same time
+    // as the target user. We use subquery to get the target user's creation time.
+    const result = await db
+      .select({
+        count: sql<number>`count(*)`,
+      })
+      .from(adminUser)
+      .where(sql`${adminUser.major} = ${major} AND ${adminUser.createAt} <= (
+        SELECT create_at FROM admin_user WHERE id = ${adminId}
+      )`);
+
+    const count = Number(result[0]?.count || 1);
+    return count.toString().padStart(2, '0');
   },
 };

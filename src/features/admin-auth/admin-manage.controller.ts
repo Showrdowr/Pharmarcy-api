@@ -3,8 +3,9 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { db } from '../../db/index.js';
 import { adminUser, adminUserRoles, roles } from '../../db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, desc, inArray, sql } from 'drizzle-orm';
 import { CreateOfficerInput, AdminUserParams } from './admin-manage.schema.js';
+import { adminAuthRepository } from './admin-auth.repository.js';
 
 export const adminManageController = {
   /**
@@ -14,7 +15,7 @@ export const adminManageController = {
     request: FastifyRequest<{ Body: CreateOfficerInput }>,
     reply: FastifyReply
   ) {
-    const { username, email, password } = request.body;
+    const { email, password, role, department, major } = request.body;
 
     // Check duplicate email
     const existingEmail = await db
@@ -27,15 +28,45 @@ export const adminManageController = {
       return reply.status(409).send({ success: false, error: 'อีเมลนี้มีอยู่ในระบบแล้ว' });
     }
 
-    // Check duplicate username
-    const existingUsername = await db
+    // Generate username based on role
+    let username = email.split('@')[0]; // Default to email prefix
+    
+    if ((role === 'officer' || role === 'system_admin') && (major || department)) {
+      // Count existing users with the same major/department for sequence
+      const sameGroupAdmins = await db
+        .select({ id: adminUser.id })
+        .from(adminUser)
+        .where(
+          major
+            ? eq(adminUser.major, major)
+            : eq(adminUser.department, department!)
+        );
+      
+      const count = sameGroupAdmins.length + 1;
+      const seq = String(count).padStart(2, '0');
+      
+      // Format: สาขาวิชา/แผนก/ลำดับ (skip null parts)
+      const parts = [major, department, seq].filter(Boolean);
+      username = parts.join('/');
+    }
+
+    // Check duplicate username (just in case email prefix is duplicated)
+    let existingUsername = await db
       .select({ id: adminUser.id })
       .from(adminUser)
       .where(eq(adminUser.username, username))
       .limit(1);
 
-    if (existingUsername.length > 0) {
-      return reply.status(409).send({ success: false, error: 'ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว' });
+    let counter = 1;
+    let finalUsername = username;
+    while (existingUsername.length > 0) {
+      finalUsername = `${username}${counter}`;
+      existingUsername = await db
+        .select({ id: adminUser.id })
+        .from(adminUser)
+        .where(eq(adminUser.username, finalUsername))
+        .limit(1);
+      counter++;
     }
 
     // Hash password + create user
@@ -44,34 +75,65 @@ export const adminManageController = {
 
     await db.insert(adminUser).values({
       id: userId,
-      username,
+      username: finalUsername,
       email,
       passwordHash,
+      department: department || null,
+      major: major || null,
     });
 
-    // Get officer role id
-    const officerRole = await db
+    // Get assigned role id
+    const assignedRole = await db
       .select({ id: roles.id })
       .from(roles)
-      .where(eq(roles.name, 'officer'))
+      .where(eq(roles.name, role))
       .limit(1);
 
-    if (officerRole.length > 0) {
+    if (assignedRole.length > 0) {
       await db.insert(adminUserRoles).values({
         adminId: userId,
-        roleId: officerRole[0].id,
+        roleId: assignedRole[0].id,
       });
+    }
+
+    // Calculate major sequence if major is provided
+    let majorSequence = null;
+    if (major) {
+      majorSequence = await adminAuthRepository.getMajorSequence(userId, major);
     }
 
     return reply.status(201).send({
       success: true,
-      user: {
-        id: userId,
-        username,
-        email,
-        role: 'officer',
-      },
+      data: {
+        user: {
+          id: userId,
+          username: finalUsername,
+          email,
+          role,
+          department,
+          major,
+          majorSequence,
+        }
+      }
     });
+  },
+
+  /**
+   *ดึงรายชื่อ Roles ทั้งหมด
+   */
+  async listRoles(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    const allRoles = await db
+      .select({
+        id: roles.id,
+        name: roles.name,
+        description: roles.description,
+      })
+      .from(roles);
+
+    return reply.send({ success: true, data: { roles: allRoles } });
   },
 
   /**
@@ -86,6 +148,8 @@ export const adminManageController = {
         id: adminUser.id,
         username: adminUser.username,
         email: adminUser.email,
+        department: adminUser.department,
+        major: adminUser.major,
         createAt: adminUser.createAt,
         roleName: roles.name,
       })
@@ -98,11 +162,13 @@ export const adminManageController = {
       id: r.id,
       username: r.username,
       email: r.email,
+      department: r.department,
+      major: r.major,
       role: r.roleName || 'officer',
       createAt: r.createAt,
     }));
 
-    return reply.send({ success: true, users });
+    return reply.send({ success: true, data: { users } });
   },
 
   /**
@@ -134,4 +200,5 @@ export const adminManageController = {
 
     return reply.send({ success: true, message: 'ลบผู้ใช้สำเร็จ' });
   },
+
 };

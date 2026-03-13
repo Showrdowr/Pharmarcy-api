@@ -27,19 +27,19 @@ export async function authRoutes(app: FastifyInstance) {
     handler: authController.me,
   });
 
-  app.withTypeProvider<ZodTypeProvider>().post('/auth/forgot-password', {
-    schema: {
-      body: forgotPasswordSchema,
-    },
-    handler: authController.forgotPassword,
-  });
+  // app.withTypeProvider<ZodTypeProvider>().post('/auth/forgot-password', {
+  //   schema: {
+  //     body: forgotPasswordSchema,
+  //   },
+  //   handler: authController.forgotPassword,
+  // });
 
-  app.withTypeProvider<ZodTypeProvider>().post('/auth/verify-otp', {
-    schema: {
-      body: verifyOtpSchema,
-    },
-    handler: authController.verifyOtp,
-  });
+  // app.withTypeProvider<ZodTypeProvider>().post('/auth/verify-otp', {
+  //   schema: {
+  //     body: verifyOtpSchema,
+  //   },
+  //   handler: authController.verifyOtp,
+  // });
 
   app.withTypeProvider<ZodTypeProvider>().post('/auth/reset-password', {
     schema: {

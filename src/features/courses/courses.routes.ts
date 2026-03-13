@@ -14,6 +14,12 @@ import {
 } from './courses.schema.js';
 
 export async function coursesRoutes(app: FastifyInstance) {
+  // Authentication required for all routes here
+  app.addHook('onRequest', app.authenticate);
+
+  // Require admin/super_admin for specific management actions
+  const requireAdmin = app.requireRole('admin', 'super_admin');
+
   const typedApp = app.withTypeProvider<ZodTypeProvider>();
 
   // Categories routes
