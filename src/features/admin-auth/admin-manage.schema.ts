@@ -7,6 +7,7 @@ export const createOfficerSchema = z.object({
   role: z.string().min(1, 'กรุณาเลือกสิทธิ์การเข้าถึง'),
   department: z.string().min(2, 'ชื่อแผนกต้องมีอย่างน้อย 2 ตัวอักษร').optional(),
   major: z.string().optional(),
+  confirmPassword: z.string().min(1, 'กรุณากรอกรหัสผ่านเพื่อยืนยัน'),
 });
 
 export type CreateOfficerInput = z.infer<typeof createOfficerSchema>;
@@ -17,3 +18,10 @@ export const adminUserParamsSchema = z.object({
 });
 
 export type AdminUserParams = z.infer<typeof adminUserParamsSchema>;
+
+// Body schema for delete (requires password confirmation)
+export const deleteAdminBodySchema = z.object({
+  confirmPassword: z.string().min(1, 'กรุณากรอกรหัสผ่านเพื่อยืนยัน'),
+});
+
+export type DeleteAdminBody = z.infer<typeof deleteAdminBodySchema>;

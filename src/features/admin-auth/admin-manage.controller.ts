@@ -4,20 +4,38 @@ import crypto from 'crypto';
 import { db } from '../../db/index.js';
 import { adminUser, adminUserRoles, roles } from '../../db/schema/index.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
-import { CreateOfficerInput, AdminUserParams } from './admin-manage.schema.js';
+import { CreateOfficerInput, AdminUserParams, DeleteAdminBody } from './admin-manage.schema.js';
 import { adminAuthRepository } from './admin-auth.repository.js';
+import { auditLogsService } from '../audit-logs/audit-logs.service.js';
 
 export const adminManageController = {
   /**
-   * สร้าง officer account (เฉพาะ admin)
+   * สร้าง officer account (เฉพาะ admin) — ต้องยืนยันรหัสผ่าน
    */
   async createOfficer(
     request: FastifyRequest<{ Body: CreateOfficerInput }>,
     reply: FastifyReply
   ) {
-    const { email, password, role, department, major } = request.body;
+    const { email, password, role, department, major, confirmPassword } = request.body;
+    const currentUser = request.user as { id: string };
 
-    // Check duplicate email
+    // 1. Verify admin's password
+    const admin = await db
+      .select({ id: adminUser.id, passwordHash: adminUser.passwordHash })
+      .from(adminUser)
+      .where(eq(adminUser.id, currentUser.id))
+      .limit(1);
+
+    if (admin.length === 0) {
+      return reply.status(401).send({ success: false, error: 'ไม่พบข้อมูลผู้ดูแลระบบ' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(confirmPassword, admin[0].passwordHash);
+    if (!isPasswordValid) {
+      return reply.status(403).send({ success: false, error: 'รหัสผ่านยืนยันไม่ถูกต้อง' });
+    }
+
+    // 2. Check duplicate email
     const existingEmail = await db
       .select({ id: adminUser.id })
       .from(adminUser)
@@ -28,11 +46,10 @@ export const adminManageController = {
       return reply.status(409).send({ success: false, error: 'อีเมลนี้มีอยู่ในระบบแล้ว' });
     }
 
-    // Generate username based on role
-    let username = email.split('@')[0]; // Default to email prefix
+    // 3. Generate username based on role
+    let username = email.split('@')[0];
     
     if ((role === 'officer' || role === 'system_admin') && (major || department)) {
-      // Count existing users with the same major/department for sequence
       const sameGroupAdmins = await db
         .select({ id: adminUser.id })
         .from(adminUser)
@@ -45,12 +62,11 @@ export const adminManageController = {
       const count = sameGroupAdmins.length + 1;
       const seq = String(count).padStart(2, '0');
       
-      // Format: สาขาวิชา/แผนก/ลำดับ (skip null parts)
       const parts = [major, department, seq].filter(Boolean);
       username = parts.join('/');
     }
 
-    // Check duplicate username (just in case email prefix is duplicated)
+    // Check duplicate username
     let existingUsername = await db
       .select({ id: adminUser.id })
       .from(adminUser)
@@ -69,7 +85,7 @@ export const adminManageController = {
       counter++;
     }
 
-    // Hash password + create user
+    // 4. Hash password + create user
     const passwordHash = await bcrypt.hash(password, 10);
     const userId = crypto.randomUUID();
 
@@ -102,6 +118,16 @@ export const adminManageController = {
       majorSequence = await adminAuthRepository.getMajorSequence(userId, major);
     }
 
+    // 5. Record audit log
+    void auditLogsService.recordAction({
+      adminId: currentUser.id,
+      action: 'CREATE_ADMIN',
+      targetTable: 'admin_user',
+      targetId: userId,
+      newValue: { username: finalUsername, email, role, department, major },
+      ipAddress: request.ip,
+    });
+
     return reply.status(201).send({
       success: true,
       data: {
@@ -119,7 +145,7 @@ export const adminManageController = {
   },
 
   /**
-   *ดึงรายชื่อ Roles ทั้งหมด
+   * ดึงรายชื่อ Roles ทั้งหมด
    */
   async listRoles(
     request: FastifyRequest,
@@ -172,22 +198,45 @@ export const adminManageController = {
   },
 
   /**
-   * ลบ admin/officer account (เฉพาะ admin, ลบตัวเองไม่ได้)
+   * ลบ admin/officer account (เฉพาะ admin, ลบตัวเองไม่ได้) — ต้องยืนยันรหัสผ่าน
    */
   async deleteAdminUser(
-    request: FastifyRequest<{ Params: AdminUserParams }>,
+    request: FastifyRequest<{ Params: AdminUserParams; Body: DeleteAdminBody }>,
     reply: FastifyReply
   ) {
     const { id } = request.params;
+    const { confirmPassword } = request.body;
     const currentUser = request.user as { id: string };
 
     if (id === currentUser.id) {
       return reply.status(400).send({ success: false, error: 'ไม่สามารถลบ account ของตัวเองได้' });
     }
 
-    // Check if user exists
+    // 1. Verify admin's password
+    const admin = await db
+      .select({ id: adminUser.id, passwordHash: adminUser.passwordHash })
+      .from(adminUser)
+      .where(eq(adminUser.id, currentUser.id))
+      .limit(1);
+
+    if (admin.length === 0) {
+      return reply.status(401).send({ success: false, error: 'ไม่พบข้อมูลผู้ดูแลระบบ' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(confirmPassword, admin[0].passwordHash);
+    if (!isPasswordValid) {
+      return reply.status(403).send({ success: false, error: 'รหัสผ่านยืนยันไม่ถูกต้อง' });
+    }
+
+    // 2. Check if target user exists and get their info for audit log
     const existing = await db
-      .select({ id: adminUser.id })
+      .select({
+        id: adminUser.id,
+        username: adminUser.username,
+        email: adminUser.email,
+        department: adminUser.department,
+        major: adminUser.major,
+      })
       .from(adminUser)
       .where(eq(adminUser.id, id))
       .limit(1);
@@ -196,7 +245,20 @@ export const adminManageController = {
       return reply.status(404).send({ success: false, error: 'ไม่พบผู้ใช้นี้' });
     }
 
+    const deletedUser = existing[0];
+
+    // 3. Delete user
     await db.delete(adminUser).where(eq(adminUser.id, id));
+
+    // 4. Record audit log
+    void auditLogsService.recordAction({
+      adminId: currentUser.id,
+      action: 'DELETE_ADMIN',
+      targetTable: 'admin_user',
+      targetId: id,
+      oldValue: { username: deletedUser.username, email: deletedUser.email, department: deletedUser.department, major: deletedUser.major },
+      ipAddress: request.ip,
+    });
 
     return reply.send({ success: true, message: 'ลบผู้ใช้สำเร็จ' });
   },

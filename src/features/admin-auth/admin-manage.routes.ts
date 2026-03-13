@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { adminManageController } from './admin-manage.controller.js';
-import { createOfficerSchema, adminUserParamsSchema } from './admin-manage.schema.js';
+import { createOfficerSchema, adminUserParamsSchema, deleteAdminBodySchema } from './admin-manage.schema.js';
 
 export async function adminManageRoutes(app: FastifyInstance) {
   // ทุก route ต้องเป็น admin (รองรับทั้ง 'admin' และ 'super_admin')
@@ -35,12 +35,13 @@ export async function adminManageRoutes(app: FastifyInstance) {
     handler: adminManageController.listAdminUsers,
   });
 
-  // Delete admin/officer user
+  // Delete admin/officer user (requires password confirmation in body)
   app.withTypeProvider<ZodTypeProvider>().delete('/admin/users/:id', {
     schema: {
       tags: ['Admin Management'],
-      summary: 'Delete admin/officer user (admin only)',
+      summary: 'Delete admin/officer user (admin only, password required)',
       params: adminUserParamsSchema,
+      body: deleteAdminBodySchema,
     },
     handler: adminManageController.deleteAdminUser,
   });
