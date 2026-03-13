@@ -29,7 +29,9 @@ export const verifyOtpSchema = z.object({
 
 export const resetPasswordSchema = z.object({
   email: z.string().email(),
-  otp: z.string().length(6),
+  otp: z.string().optional(), // Hidden OTP feature (length constraint removed for compatibility)
+  captchaAnswer: z.string().optional(),
+  captchaToken: z.string().optional(),
   newPassword: z.string().min(8),
 });
 

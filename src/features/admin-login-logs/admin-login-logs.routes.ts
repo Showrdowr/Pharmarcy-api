@@ -5,7 +5,7 @@ import { listLoginLogsQuerySchema } from './admin-login-logs.schema.js';
 
 export async function adminLoginLogsRoutes(app: FastifyInstance) {
   app.register(async (adminApp) => {
-    adminApp.addHook('onRequest', app.requireRole('admin'));
+    adminApp.addHook('onRequest', app.requireRole('admin', 'super_admin'));
 
     const typedAdminApp = adminApp.withTypeProvider<ZodTypeProvider>();
 

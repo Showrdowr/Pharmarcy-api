@@ -6,6 +6,7 @@ services:
     environment:
       POSTGRES_PASSWORD: 1234
       POSTGRES_DB: pharmacy_academy_db
+      TZ: Asia/Bangkok
     ports:
       - "5433:5432"
     volumes:

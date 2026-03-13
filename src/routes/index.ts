@@ -5,6 +5,7 @@ import { adminAuthRoutes, adminManageRoutes } from '../features/admin-auth/index
 import { coursesRoutes } from '../features/courses/index.js';
 import { auditLogsRoutes } from '../features/audit-logs/index.js';
 import { adminLoginLogsRoutes } from '../features/admin-login-logs/admin-login-logs.routes.js';
+import { adminManageController } from '../features/admin-auth/admin-manage.controller.js';
 
 export async function registerRoutes(app: FastifyInstance) {
   // Register user routes with /api/v1 prefix

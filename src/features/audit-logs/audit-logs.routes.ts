@@ -8,7 +8,7 @@ export async function auditLogsRoutes(app: FastifyInstance) {
 
   app.register(async (adminApp) => {
     // Require admin role for all audit logs routes
-    adminApp.addHook('onRequest', app.requireRole('admin'));
+    adminApp.addHook('onRequest', app.requireRole('admin', 'super_admin'));
 
     const typedAdminApp = adminApp.withTypeProvider<ZodTypeProvider>();
 

@@ -11,6 +11,8 @@ export const adminUser = pgTable('admin_user', {
   passwordHash: text('password_hash').notNull(),
   failedAttempts: integer('failed_attempts').default(0),
   lastFailedAt: timestamp('last_failed_at'),
+  department: varchar('department', { length: 100 }),
+  major: varchar('major', { length: 100 }),
   createAt: timestamp('create_at').defaultNow(),
   updateAt: timestamp('update_at').defaultNow(),
 });
@@ -18,7 +20,7 @@ export const adminUser = pgTable('admin_user', {
 // =============================================
 // Roles table
 // =============================================
-export const roles = pgTable('roles', {
+export const roles = pgTable('admin_roles', {
   id: uuid('id').primaryKey(),
   name: varchar('name', { length: 100 }).notNull().unique(),
   description: text('description'),

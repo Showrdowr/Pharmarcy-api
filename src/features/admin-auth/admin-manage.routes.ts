@@ -4,8 +4,8 @@ import { adminManageController } from './admin-manage.controller.js';
 import { createOfficerSchema, adminUserParamsSchema } from './admin-manage.schema.js';
 
 export async function adminManageRoutes(app: FastifyInstance) {
-  // ทุก route ต้องเป็น admin เท่านั้น
-  app.addHook('onRequest', app.requireRole('admin'));
+  // ทุก route ต้องเป็น admin (รองรับทั้ง 'admin' และ 'super_admin')
+  app.addHook('onRequest', app.requireRole('admin', 'super_admin'));
 
   // Create officer account
   app.withTypeProvider<ZodTypeProvider>().post('/admin/users', {
@@ -15,6 +15,15 @@ export async function adminManageRoutes(app: FastifyInstance) {
       body: createOfficerSchema,
     },
     handler: adminManageController.createOfficer,
+  });
+  
+  // List all roles
+  app.withTypeProvider<ZodTypeProvider>().get('/admin/roles', {
+    schema: {
+      tags: ['Admin Management'],
+      summary: 'List all available roles',
+    },
+    handler: adminManageController.listRoles,
   });
 
   // List all admin/officer users

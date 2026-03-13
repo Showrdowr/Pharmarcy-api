@@ -21,12 +21,12 @@ async function seed() {
   const officerRoleId = crypto.randomUUID();
 
   // Check if roles already exist
-  const existingRoles = await sql`SELECT name FROM roles`;
+  const existingRoles = await sql`SELECT name FROM admin_roles`;
   const existingRoleNames = existingRoles.map(r => r.name);
 
   if (!existingRoleNames.includes('admin')) {
     await sql`
-      INSERT INTO roles (id, name, description)
+      INSERT INTO admin_roles (id, name, description)
       VALUES (${adminRoleId}, 'admin', 'ผู้ดูแลระบบ — สามารถจัดการได้ทุกอย่าง รวมถึงอนุมัติเนื้อหาและสร้าง account')
     `;
     console.log('✅ Created role: admin');
@@ -36,7 +36,7 @@ async function seed() {
 
   if (!existingRoleNames.includes('officer')) {
     await sql`
-      INSERT INTO roles (id, name, description)
+      INSERT INTO admin_roles (id, name, description)
       VALUES (${officerRoleId}, 'officer', 'เจ้าหน้าที่ — จัดการระบบการเรียน (คอร์ส, วิดีโอ, เอกสาร, ข้อสอบ) แต่ต้องรอ admin อนุมัติก่อน publish')
     `;
     console.log('✅ Created role: officer');
@@ -64,8 +64,7 @@ async function seed() {
     console.log(`✅ Created default admin user: ${defaultAdminEmail}`);
 
     // Assign admin role
-    // Get the actual admin role id (might have been created in a previous run)
-    const adminRole = await sql`SELECT id FROM roles WHERE name = 'admin'`;
+    const adminRole = await sql`SELECT id FROM admin_roles WHERE name = 'admin'`;
     if (adminRole.length > 0) {
       await sql`
         INSERT INTO admin_user_roles (admin_id, role_id)
@@ -82,7 +81,7 @@ async function seed() {
   // =============================================
   console.log('\n📋 Current state:');
 
-  const allRoles = await sql`SELECT id, name, description FROM roles ORDER BY name`;
+  const allRoles = await sql`SELECT id, name, description FROM admin_roles ORDER BY name`;
   console.log('\nRoles:');
   allRoles.forEach(r => console.log(`  - ${r.name}: ${r.description}`));
 
@@ -90,7 +89,7 @@ async function seed() {
     SELECT au.id, au.username, au.email, r.name as role_name
     FROM admin_user au
     LEFT JOIN admin_user_roles aur ON au.id = aur.admin_id
-    LEFT JOIN roles r ON aur.role_id = r.id
+    LEFT JOIN admin_roles r ON aur.role_id = r.id
     ORDER BY au.username
   `;
   console.log('\nAdmin Users:');
