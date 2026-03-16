@@ -1,29 +1,14 @@
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-RUN npm ci
-
-# Copy source code and build
-COPY . .
-RUN npm run build
-
-# Second stage: production environment
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package info
+# Install dependencies needed for running (including tsx and typescript)
 COPY package*.json ./
+RUN npm ci
 
-# Install only production dependencies
-RUN npm ci --omit=dev
+# Copy source code
+COPY . .
 
-# Copy compiled source code
-COPY --from=builder /app/dist ./dist
-
-# Start the server
+# Start the server using tsx
 EXPOSE 3001
 CMD ["npm", "run", "start"]
