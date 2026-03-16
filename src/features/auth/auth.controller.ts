@@ -149,42 +149,26 @@ export const authController = {
     });
   },
 
+  // OTP handlers hidden - using CAPTCHA flow instead
   // async forgotPassword(
   //   request: FastifyRequest<{ Body: ForgotPasswordInput }>,
   //   reply: FastifyReply
   // ) {
   //   const { email } = request.body;
   //   const user = await userRepository.findByEmail(email);
-
   //   if (!user) {
-  //     return reply.status(404).send({
-  //       success: false,
-  //       error: 'ไม่พบอีเมลนี้ในระบบ',
-  //     });
+  //     return reply.status(404).send({ success: false, error: 'ไม่พบอีเมลนี้ในระบบ' });
   //   }
-
-  //   // Generate 6-digit OTP
   //   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  //   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-  //   // Save OTP to DB
+  //   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
   //   await userRepository.updateResetOtp(email, otp, expiresAt);
-
-  //   // Send OTP email
   //   try {
   //     await sendOtpEmail(email, otp);
   //   } catch (err) {
   //     request.log.error(err, 'Failed to send OTP email');
-  //     return reply.status(500).send({
-  //       success: false,
-  //       error: 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่',
-  //     });
+  //     return reply.status(500).send({ success: false, error: 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่' });
   //   }
-
-  //   return reply.send({
-  //     success: true,
-  //     message: 'ส่งรหัส OTP ไปยังอีเมลของคุณแล้ว',
-  //   });
+  //   return reply.send({ success: true, message: 'ส่งรหัส OTP ไปยังอีเมลของคุณแล้ว' });
   // },
 
   // async verifyOtp(
@@ -193,19 +177,15 @@ export const authController = {
   // ) {
   //   const { email, otp } = request.body;
   //   const user = await userRepository.findByEmail(email);
-
   //   if (!user) {
   //     return reply.status(404).send({ success: false, error: 'ไม่พบอีเมลนี้ในระบบ' });
   //   }
-
   //   if (!user.resetOtp || user.resetOtp !== otp) {
   //     return reply.status(400).send({ success: false, error: 'รหัส OTP ไม่ถูกต้อง' });
   //   }
-
   //   if (!user.resetOtpExpiresAt || new Date() > user.resetOtpExpiresAt) {
   //     return reply.status(400).send({ success: false, error: 'รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่' });
   //   }
-
   //   return reply.send({ success: true, message: 'ยืนยัน OTP สำเร็จ' });
   // },
 

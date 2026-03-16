@@ -27,6 +27,7 @@ export async function authRoutes(app: FastifyInstance) {
     handler: authController.me,
   });
 
+  // OTP routes hidden - using CAPTCHA flow instead
   // app.withTypeProvider<ZodTypeProvider>().post('/auth/forgot-password', {
   //   schema: {
   //     body: forgotPasswordSchema,
