@@ -78,7 +78,7 @@ export async function coursesRoutes(app: FastifyInstance) {
 
   // Admin only Category routes
   app.register(async (adminApp) => {
-    adminApp.addHook('onRequest', app.requireRole('admin', 'super_admin'));
+    adminApp.addHook('onRequest', app.requireRole('admin', 'super_admin', 'system_admin'));
 
     const typedAdminApp = adminApp.withTypeProvider<ZodTypeProvider>();
 
