@@ -1,7 +1,10 @@
-import { pgTable, serial, varchar, text, integer, numeric, timestamp, boolean, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, text, integer, numeric, timestamp, boolean, jsonb, index, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { users } from './users';
 import { courses, questionTypeEnum } from './courses';
+
+// Exam attempt status enum
+export const examAttemptStatusEnum = pgEnum('exam_attempt_status', ['IN_PROGRESS', 'SUBMITTED', 'GRADED']);
 
 // Exams table
 export const exams = pgTable('exams', {
@@ -22,6 +25,10 @@ export const examQuestions = pgTable('exam_questions', {
   options: jsonb('options'),
   scoreWeight: integer('score_weight').notNull(),
   correctAnswer: text('correct_answer'),
+}, (table) => {
+  return {
+    examIdx: index('exam_questions_exam_id_idx').on(table.examId),
+  };
 });
 
 // User Exam Attempts table
@@ -29,11 +36,17 @@ export const userExamAttempts = pgTable('user_exam_attempts', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
   examId: integer('exam_id').notNull().references(() => exams.id),
+  status: examAttemptStatusEnum('status').notNull().default('IN_PROGRESS'),
   scoreObtained: numeric('score_obtained', { precision: 10, scale: 2 }),
   totalScore: numeric('total_score', { precision: 10, scale: 2 }),
   isPassed: boolean('is_passed'),
   startedAt: timestamp('started_at', { withTimezone: true }).defaultNow(),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
+}, (table) => {
+  return {
+    userIdx: index('user_exam_attempts_user_id_idx').on(table.userId),
+    examIdx: index('user_exam_attempts_exam_id_idx').on(table.examId),
+  };
 });
 
 // User Exam Answers table
@@ -41,8 +54,10 @@ export const userExamAnswers = pgTable('user_exam_answers', {
   id: serial('id').primaryKey(),
   attemptId: integer('attempt_id').notNull().references(() => userExamAttempts.id),
   examQuestionId: integer('exam_question_id').notNull().references(() => examQuestions.id),
+  answerText: text('answer_text'),
   isCorrect: boolean('is_correct'),
   pointsEarned: numeric('points_earned', { precision: 10, scale: 2 }),
+  feedback: text('feedback'),
 });
 
 // Relations

@@ -1,8 +1,8 @@
 import { db } from '../../db/index.js';
 import { categories, subcategories, courses } from '../../db/schema/index.js';
 import { eq, desc } from 'drizzle-orm';
-import type { 
-  CreateCategoryInput, 
+import type {
+  CreateCategoryInput,
   UpdateCategoryInput,
   CreateSubcategoryInput,
   UpdateSubcategoryInput,
@@ -81,13 +81,15 @@ export const coursesRepository = {
   },
 
   // Course operations
-  async listCourses() {
+  async listCourses(limit: number = 20, offset: number = 0) {
     return await db.query.courses.findMany({
       with: {
         category: true,
         subcategory: true,
       },
       orderBy: [desc(courses.createdAt)],
+      limit,
+      offset,
     });
   },
 
@@ -109,19 +111,38 @@ export const coursesRepository = {
   },
 
   async createCourse(data: CreateCourseInput) {
+    const enrollmentDeadline =
+      data.enrollmentDeadline ? new Date(data.enrollmentDeadline) : null;
+    const skillLevel = data.skillLevel ?? 'ALL';
+    const hasCertificate = data.hasCertificate ?? false;
+
     const [result] = await db.insert(courses).values({
       ...data,
       price: data.price ? data.price.toString() : null,
+      skillLevel,
+      hasCertificate,
+      enrollmentDeadline,
     }).returning();
     return result;
   },
 
   async updateCourse(id: number, data: UpdateCourseInput) {
+    const enrollmentDeadline =
+      data.enrollmentDeadline !== undefined
+        ? (data.enrollmentDeadline ? new Date(data.enrollmentDeadline) : null)
+        : undefined;
+    const skillLevel = data.skillLevel === null ? 'ALL' : data.skillLevel;
+    const hasCertificate =
+      data.hasCertificate === null ? false : data.hasCertificate;
+
     const [result] = await db
       .update(courses)
       .set({
         ...data,
         price: data.price ? data.price.toString() : undefined,
+        skillLevel,
+        hasCertificate,
+        enrollmentDeadline,
         updatedAt: new Date(),
       })
       .where(eq(courses.id, id))

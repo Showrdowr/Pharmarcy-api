@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { authController } from './auth.controller.js';
-import { loginSchema, registerSchema, forgotPasswordSchema, verifyOtpSchema, resetPasswordSchema } from './auth.schema.js';
+import { loginSchema, registerSchema, forgotPasswordSchema, verifyOtpSchema, resetPasswordSchema, updateProfileSchema, changePasswordSchema } from './auth.schema.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.withTypeProvider<ZodTypeProvider>().post('/auth/login', {
@@ -27,19 +27,39 @@ export async function authRoutes(app: FastifyInstance) {
     handler: authController.me,
   });
 
-  // app.withTypeProvider<ZodTypeProvider>().post('/auth/forgot-password', {
-  //   schema: {
-  //     body: forgotPasswordSchema,
-  //   },
-  //   handler: authController.forgotPassword,
-  // });
+  app.post('/auth/logout', {
+    handler: authController.logout,
+  });
 
-  // app.withTypeProvider<ZodTypeProvider>().post('/auth/verify-otp', {
-  //   schema: {
-  //     body: verifyOtpSchema,
-  //   },
-  //   handler: authController.verifyOtp,
-  // });
+  app.withTypeProvider<ZodTypeProvider>().put('/auth/profile', {
+    onRequest: [app.authenticate],
+    schema: {
+      body: updateProfileSchema,
+    },
+    handler: authController.updateProfile,
+  });
+
+  app.withTypeProvider<ZodTypeProvider>().post('/auth/change-password', {
+    onRequest: [app.authenticate],
+    schema: {
+      body: changePasswordSchema,
+    },
+    handler: authController.changePassword,
+  });
+
+  app.withTypeProvider<ZodTypeProvider>().post('/auth/forgot-password', {
+    schema: {
+      body: forgotPasswordSchema,
+    },
+    handler: authController.forgotPassword,
+  });
+
+  app.withTypeProvider<ZodTypeProvider>().post('/auth/verify-otp', {
+    schema: {
+      body: verifyOtpSchema,
+    },
+    handler: authController.verifyOtp,
+  });
 
   app.withTypeProvider<ZodTypeProvider>().post('/auth/reset-password', {
     schema: {

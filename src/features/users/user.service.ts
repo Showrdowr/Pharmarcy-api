@@ -1,10 +1,17 @@
 import { CreateUserInput, UpdateUserInput } from './user.schema.js';
 import { userRepository } from './user.repository.js';
-import { createHash } from 'crypto';
+import bcrypt from 'bcrypt';
 
-// Simple password hashing (for production use bcrypt instead)
-function hashPassword(password: string): string {
-  return createHash('sha256').update(password).digest('hex');
+// Password hashing using bcrypt (consistent with auth.service.ts)
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+// กรองข้อมูลที่อ่อนไหว (passwordHash, resetOtp) ออกก่อนส่งให้ Client
+function stripSensitiveFields(user: any) {
+  if (!user) return user;
+  const { passwordHash, resetOtp, resetOtpExpiresAt, ...safeUser } = user;
+  return safeUser;
 }
 
 export const userService = {
@@ -19,7 +26,7 @@ export const userService = {
     if (!user) {
       throw Object.assign(new Error('User not found'), { statusCode: 404 });
     }
-    return user;
+    return stripSensitiveFields(user);
   },
 
   async createUser(input: CreateUserInput) {
@@ -28,12 +35,13 @@ export const userService = {
       throw Object.assign(new Error('Email already exists'), { statusCode: 409 });
     }
 
-    const passwordHash = hashPassword(input.password);
-    return userRepository.create({
+    const passwordHash = await hashPassword(input.password);
+    const user = await userRepository.create({
       email: input.email,
       passwordHash,
       fullName: input.fullName,
     });
+    return stripSensitiveFields(user);
   },
 
   async updateUser(id: number, input: UpdateUserInput) {
@@ -41,7 +49,7 @@ export const userService = {
     if (!user) {
       throw Object.assign(new Error('User not found'), { statusCode: 404 });
     }
-    return user;
+    return stripSensitiveFields(user);
   },
 
   async deleteUser(id: number) {

@@ -1,7 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import bcrypt from 'bcrypt';
 import { authService } from './auth.service.js';
-import { LoginInput, RegisterInput, ForgotPasswordInput, ResetPasswordInput } from './auth.schema.js';
+import { LoginInput, RegisterInput, ForgotPasswordInput, ResetPasswordInput, UpdateProfileInput, ChangePasswordInput } from './auth.schema.js';
 import type { z } from 'zod';
 import type { verifyOtpSchema } from './auth.schema.js';
 type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
@@ -15,7 +15,6 @@ export const authController = {
     reply: FastifyReply
   ) {
     const { email, password, captchaAnswer, captchaToken } = request.body;
-    console.log('DEBUG: User Login Attempt:', { email, captchaAnswer, hasToken: !!captchaToken });
 
     // 1. Find user first to check failed attempts
     const user = await userRepository.findByEmail(email);
@@ -149,65 +148,127 @@ export const authController = {
     });
   },
 
-  // async forgotPassword(
-  //   request: FastifyRequest<{ Body: ForgotPasswordInput }>,
-  //   reply: FastifyReply
-  // ) {
-  //   const { email } = request.body;
-  //   const user = await userRepository.findByEmail(email);
+  async logout(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    return reply.send({ success: true, message: 'ออกจากระบบสำเร็จ' });
+  },
 
-  //   if (!user) {
-  //     return reply.status(404).send({
-  //       success: false,
-  //       error: 'ไม่พบอีเมลนี้ในระบบ',
-  //     });
-  //   }
+  async updateProfile(
+    request: FastifyRequest<{ Body: UpdateProfileInput }>,
+    reply: FastifyReply
+  ) {
+    const userPayload = request.user as { id: number };
+    const user = await userRepository.findById(userPayload.id);
 
-  //   // Generate 6-digit OTP
-  //   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  //   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    if (!user) {
+      return reply.status(404).send({ success: false, error: 'ไม่พบผู้ใช้' });
+    }
 
-  //   // Save OTP to DB
-  //   await userRepository.updateResetOtp(email, otp, expiresAt);
+    const updateData: Record<string, string | undefined> = {};
+    if (request.body.fullName !== undefined) updateData.fullName = request.body.fullName;
+    if (request.body.professionalLicenseNumber !== undefined) updateData.professionalLicenseNumber = request.body.professionalLicenseNumber;
 
-  //   // Send OTP email
-  //   try {
-  //     await sendOtpEmail(email, otp);
-  //   } catch (err) {
-  //     request.log.error(err, 'Failed to send OTP email');
-  //     return reply.status(500).send({
-  //       success: false,
-  //       error: 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่',
-  //     });
-  //   }
+    if (Object.keys(updateData).length === 0) {
+      return reply.status(400).send({ success: false, error: 'ไม่มีข้อมูลที่ต้องการอัปเดต' });
+    }
 
-  //   return reply.send({
-  //     success: true,
-  //     message: 'ส่งรหัส OTP ไปยังอีเมลของคุณแล้ว',
-  //   });
-  // },
+    const updated = await userRepository.update(userPayload.id, updateData);
 
-  // async verifyOtp(
-  //   request: FastifyRequest<{ Body: VerifyOtpInput }>,
-  //   reply: FastifyReply
-  // ) {
-  //   const { email, otp } = request.body;
-  //   const user = await userRepository.findByEmail(email);
+    return reply.send({
+      success: true,
+      user: {
+        id: updated!.id,
+        fullName: updated!.fullName,
+        email: updated!.email,
+        role: updated!.role,
+        professionalLicenseNumber: updated!.professionalLicenseNumber,
+      },
+    });
+  },
 
-  //   if (!user) {
-  //     return reply.status(404).send({ success: false, error: 'ไม่พบอีเมลนี้ในระบบ' });
-  //   }
+  async changePassword(
+    request: FastifyRequest<{ Body: ChangePasswordInput }>,
+    reply: FastifyReply
+  ) {
+    const userPayload = request.user as { id: number };
+    const user = await userRepository.findById(userPayload.id);
 
-  //   if (!user.resetOtp || user.resetOtp !== otp) {
-  //     return reply.status(400).send({ success: false, error: 'รหัส OTP ไม่ถูกต้อง' });
-  //   }
+    if (!user) {
+      return reply.status(404).send({ success: false, error: 'ไม่พบผู้ใช้' });
+    }
 
-  //   if (!user.resetOtpExpiresAt || new Date() > user.resetOtpExpiresAt) {
-  //     return reply.status(400).send({ success: false, error: 'รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่' });
-  //   }
+    const isValid = await bcrypt.compare(request.body.oldPassword, user.passwordHash);
+    if (!isValid) {
+      return reply.status(401).send({ success: false, error: 'รหัสผ่านเดิมไม่ถูกต้อง' });
+    }
 
-  //   return reply.send({ success: true, message: 'ยืนยัน OTP สำเร็จ' });
-  // },
+    const newHash = await bcrypt.hash(request.body.newPassword, 10);
+    await userRepository.update(userPayload.id, { passwordHash: newHash });
+
+    return reply.send({ success: true, message: 'เปลี่ยนรหัสผ่านสำเร็จ' });
+  },
+
+  async forgotPassword(
+    request: FastifyRequest<{ Body: ForgotPasswordInput }>,
+    reply: FastifyReply
+  ) {
+    const { email } = request.body;
+    const user = await userRepository.findByEmail(email);
+
+    if (!user) {
+      return reply.status(404).send({
+        success: false,
+        error: 'ไม่พบอีเมลนี้ในระบบ',
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Save OTP to DB
+    await userRepository.updateResetOtp(email, otp, expiresAt);
+
+    // Send OTP email
+    try {
+      await sendOtpEmail(email, otp);
+    } catch (err) {
+      request.log.error(err, 'Failed to send OTP email');
+      return reply.status(500).send({
+        success: false,
+        error: 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่',
+      });
+    }
+
+    return reply.send({
+      success: true,
+      message: 'ส่งรหัส OTP ไปยังอีเมลของคุณแล้ว',
+    });
+  },
+
+  async verifyOtp(
+    request: FastifyRequest<{ Body: VerifyOtpInput }>,
+    reply: FastifyReply
+  ) {
+    const { email, otp } = request.body;
+    const user = await userRepository.findByEmail(email);
+
+    if (!user) {
+      return reply.status(404).send({ success: false, error: 'ไม่พบอีเมลนี้ในระบบ' });
+    }
+
+    if (!user.resetOtp || user.resetOtp !== otp) {
+      return reply.status(400).send({ success: false, error: 'รหัส OTP ไม่ถูกต้อง' });
+    }
+
+    if (!user.resetOtpExpiresAt || new Date() > user.resetOtpExpiresAt) {
+      return reply.status(400).send({ success: false, error: 'รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่' });
+    }
+
+    return reply.send({ success: true, message: 'ยืนยัน OTP สำเร็จ' });
+  },
 
   async resetPassword(
     request: FastifyRequest<{ Body: ResetPasswordInput }>,

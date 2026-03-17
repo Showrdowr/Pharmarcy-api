@@ -35,5 +35,17 @@ export const resetPasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
+export const updateProfileSchema = z.object({
+  fullName: z.string().min(1).optional(),
+  professionalLicenseNumber: z.string().optional(),
+});
+
+export const changePasswordSchema = z.object({
+  oldPassword: z.string().min(6),
+  newPassword: z.string().min(8),
+});
+
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

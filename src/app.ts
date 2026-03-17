@@ -20,6 +20,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           ? { target: 'pino-pretty', options: { colorize: true } }
           : undefined,
     },
+    bodyLimit: 10 * 1024 * 1024, // 10MB — supports base64 thumbnail images
   });
 
   // Log incoming requests

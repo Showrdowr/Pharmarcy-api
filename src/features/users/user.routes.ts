@@ -6,6 +6,9 @@ import { userService } from './user.service.js';
 import { createUserSchema, updateUserSchema, userParamsSchema } from './user.schema.js';
 
 export async function userRoutes(app: FastifyInstance) {
+  // ป้องกันเส้นทาง Users ทั้งหมด — ให้เข้าถึงได้เฉพาะ Admin หรือ Super Admin เท่านั้น
+  app.addHook('onRequest', app.requireRole('admin', 'super_admin'));
+
   app.withTypeProvider<ZodTypeProvider>().get('/users', {
     schema: {
       tags: ['Users'],

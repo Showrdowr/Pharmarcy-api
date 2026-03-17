@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm';
 
 // Enums
 export const courseStatusEnum = pgEnum('course_status', ['DRAFT', 'PUBLISHED', 'ARCHIVED']);
+export const courseSkillLevelEnum = pgEnum('course_skill_level', ['ALL', 'BEGINNER', 'INTERMEDIATE', 'ADVANCED']);
 export const videoProviderEnum = pgEnum('video_provider', ['YOUTUBE', 'VIMEO', 'CLOUDFLARE', 'S3']);
 export const questionTypeEnum = pgEnum('question_type', ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'SHORT_ANSWER']);
 
@@ -42,6 +43,7 @@ export const courses = pgTable('courses', {
   subcategoryId: integer('subcategory_id').references(() => subcategories.id, { onDelete: 'set null' }),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
+  details: text('details'),
   authorName: varchar('author_name', { length: 255 }),
   price: numeric('price', { precision: 10, scale: 2 }),
   thumbnail: text('thumbnail'), // Reverting to text as placeholder or if it's base64. 
@@ -49,6 +51,10 @@ export const courses = pgTable('courses', {
   previewVideoId: integer('preview_video_id').references(() => videos.id),
   cpeCredits: integer('cpe_credits').default(0),
   conferenceCode: varchar('conference_code', { length: 255 }),
+  language: varchar('language', { length: 50 }),
+  skillLevel: courseSkillLevelEnum('skill_level').notNull().default('ALL'),
+  hasCertificate: boolean('has_certificate').notNull().default(false),
+  enrollmentDeadline: timestamp('enrollment_deadline', { withTimezone: true }),
   status: courseStatusEnum('status').notNull().default('DRAFT'),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -59,7 +65,7 @@ export const courses = pgTable('courses', {
 export const lessons = pgTable('lessons', {
   id: serial('id').primaryKey(),
   courseId: integer('course_id').notNull().references(() => courses.id),
-  videoId: integer('video_id').notNull().references(() => videos.id),
+  videoId: integer('video_id').references(() => videos.id),
   title: varchar('title', { length: 255 }).notNull(),
   sequenceOrder: integer('sequence_order').notNull(),
 });

@@ -2,6 +2,7 @@ import { pgTable, foreignKey, serial, integer, varchar, text, jsonb, timestamp, 
 import { sql } from "drizzle-orm"
 
 export const courseStatus = pgEnum("course_status", ['DRAFT', 'PUBLISHED', 'ARCHIVED'])
+export const courseSkillLevel = pgEnum("course_skill_level", ['ALL', 'BEGINNER', 'INTERMEDIATE', 'ADVANCED'])
 export const discountType = pgEnum("discount_type", ['PERCENTAGE', 'FIXED_AMOUNT'])
 export const orderStatus = pgEnum("order_status", ['PENDING', 'PAID', 'CANCELLED', 'REFUNDED'])
 export const questionType = pgEnum("question_type", ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'SHORT_ANSWER'])
@@ -88,6 +89,10 @@ export const courses = pgTable("courses", {
 	previewVideoId: integer("preview_video_id"),
 	cpeCredits: integer("cpe_credits").default(0),
 	conferenceCode: varchar("conference_code", { length: 255 }),
+	language: varchar({ length: 50 }),
+	skillLevel: courseSkillLevel("skill_level").default('ALL').notNull(),
+	hasCertificate: boolean("has_certificate").default(false).notNull(),
+	enrollmentDeadline: timestamp("enrollment_deadline", { withTimezone: true, mode: 'string' }),
 	status: courseStatus().default('DRAFT').notNull(),
 	publishedAt: timestamp("published_at", { withTimezone: true, mode: 'string' }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),

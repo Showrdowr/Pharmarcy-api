@@ -1,7 +1,7 @@
 import { coursesRepository } from './courses.repository.js';
 import { auditLogsService } from '../audit-logs/audit-logs.service.js';
-import type { 
-  CreateCategoryInput, 
+import type {
+  CreateCategoryInput,
   UpdateCategoryInput,
   CreateSubcategoryInput,
   UpdateSubcategoryInput,
@@ -119,8 +119,8 @@ export const coursesService = {
   },
 
   // Course logic
-  async listCourses() {
-    return await coursesRepository.listCourses();
+  async listCourses(limit?: number, offset?: number) {
+    return await coursesRepository.listCourses(limit, offset);
   },
 
   async getCourse(id: number) {

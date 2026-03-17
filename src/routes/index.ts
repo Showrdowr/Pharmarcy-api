@@ -6,6 +6,11 @@ import { coursesRoutes } from '../features/courses/index.js';
 import { auditLogsRoutes } from '../features/audit-logs/index.js';
 import { adminLoginLogsRoutes } from '../features/admin-login-logs/admin-login-logs.routes.js';
 import { adminManageController } from '../features/admin-auth/admin-manage.controller.js';
+import { dashboardRoutes } from '../features/dashboard/dashboard.routes.js';
+import { ordersRoutes } from '../features/orders/orders.routes.js';
+import { examsRoutes } from '../features/exams/exams.routes.js';
+import { gradingRoutes } from '../features/grading/grading.routes.js';
+import { cpeCreditsRoutes } from '../features/cpe-credits/cpe-credits.routes.js';
 
 export async function registerRoutes(app: FastifyInstance) {
   // Register user routes with /api/v1 prefix
@@ -18,4 +23,9 @@ export async function registerRoutes(app: FastifyInstance) {
   // Admin/Backoffice routes
   await app.register(adminAuthRoutes, { prefix: '/api/v1' });
   await app.register(adminManageRoutes, { prefix: '/api/v1' });
+  await app.register(dashboardRoutes, { prefix: '/api/v1' });
+  await app.register(ordersRoutes, { prefix: '/api/v1' });
+  await app.register(examsRoutes, { prefix: '/api/v1' });
+  await app.register(gradingRoutes, { prefix: '/api/v1' });
+  await app.register(cpeCreditsRoutes, { prefix: '/api/v1' });
 }

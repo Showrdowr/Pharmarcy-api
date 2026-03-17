@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { db } from '../../db/index.js';
 import { adminUser, adminUserRoles, roles } from '../../db/schema/index.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
-import { CreateOfficerInput, AdminUserParams, DeleteAdminBody } from './admin-manage.schema.js';
+import { CreateOfficerInput, AdminUserParams, DeleteAdminBody, UpdateAdminUserInput } from './admin-manage.schema.js';
 import { adminAuthRepository } from './admin-auth.repository.js';
 import { auditLogsService } from '../audit-logs/audit-logs.service.js';
 
@@ -261,6 +261,92 @@ export const adminManageController = {
     });
 
     return reply.send({ success: true, message: 'ลบผู้ใช้สำเร็จ' });
+  },
+
+  /**
+   * อัปเดตข้อมูล admin/officer user
+   */
+  async updateAdminUser(
+    request: FastifyRequest<{ Params: AdminUserParams; Body: UpdateAdminUserInput }>,
+    reply: FastifyReply
+  ) {
+    const { id } = request.params;
+    const currentUser = request.user as { id: string };
+    const { email, department, major, role } = request.body;
+
+    // Check if target user exists
+    const existing = await db
+      .select({
+        id: adminUser.id,
+        username: adminUser.username,
+        email: adminUser.email,
+        department: adminUser.department,
+        major: adminUser.major,
+      })
+      .from(adminUser)
+      .where(eq(adminUser.id, id))
+      .limit(1);
+
+    if (existing.length === 0) {
+      return reply.status(404).send({ success: false, error: 'ไม่พบผู้ใช้นี้' });
+    }
+
+    const oldValue = existing[0];
+
+    // Build update data
+    const updateData: Record<string, string | null> = {};
+    if (email !== undefined) updateData.email = email;
+    if (department !== undefined) updateData.department = department || null;
+    if (major !== undefined) updateData.major = major || null;
+
+    if (Object.keys(updateData).length > 0) {
+      await db.update(adminUser).set(updateData).where(eq(adminUser.id, id));
+    }
+
+    // Update role if provided
+    if (role) {
+      const targetRole = await db
+        .select({ id: roles.id })
+        .from(roles)
+        .where(eq(roles.name, role))
+        .limit(1);
+
+      if (targetRole.length > 0) {
+        // Remove existing roles
+        await db.delete(adminUserRoles).where(eq(adminUserRoles.adminId, id));
+        // Assign new role
+        await db.insert(adminUserRoles).values({
+          adminId: id,
+          roleId: targetRole[0].id,
+        });
+      }
+    }
+
+    // Record audit log
+    void auditLogsService.recordAction({
+      adminId: currentUser.id,
+      action: 'UPDATE_ADMIN',
+      targetTable: 'admin_user',
+      targetId: id,
+      oldValue,
+      newValue: { email, department, major, role },
+      ipAddress: request.ip,
+    });
+
+    // Fetch updated user
+    const updated = await db
+      .select({
+        id: adminUser.id,
+        username: adminUser.username,
+        email: adminUser.email,
+        department: adminUser.department,
+        major: adminUser.major,
+      })
+      .from(adminUser)
+      .where(eq(adminUser.id, id))
+      .limit(1);
+
+    return reply.send({ success: true, data: { user: updated[0] } });
   },
 
 };

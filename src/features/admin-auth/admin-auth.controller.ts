@@ -11,7 +11,6 @@ export const adminAuthController = {
     request: FastifyRequest<{ Body: AdminLoginInput }>,
     reply: FastifyReply
   ) {
-    console.log('DEBUG: Hit AdminAuthController.login');
     try {
       const { email, password, captchaAnswer, captchaToken } = request.body;
 

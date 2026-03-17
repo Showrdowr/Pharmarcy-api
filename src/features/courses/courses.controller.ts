@@ -1,12 +1,12 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { coursesService } from './courses.service.js';
-import type { 
-  CreateCategoryInput, 
+import type {
+  CreateCategoryInput,
   UpdateCategoryInput,
   CreateSubcategoryInput,
   UpdateSubcategoryInput,
   CreateCourseInput,
-  UpdateCourseInput 
+  UpdateCourseInput
 } from './courses.schema.js';
 
 export const coursesController = {
@@ -88,9 +88,17 @@ export const coursesController = {
   },
 
   // Course handlers
-  async listCourses(request: FastifyRequest, reply: FastifyReply) {
-    const courses = await coursesService.listCourses();
-    return reply.send({ data: courses });
+  async listCourses(request: FastifyRequest<{ Querystring: { page?: string; limit?: string } }>, reply: FastifyReply) {
+    const page = request.query.page ? parseInt(request.query.page, 10) : 1;
+    const limit = request.query.limit ? parseInt(request.query.limit, 10) : 20;
+    const offset = (page - 1) * limit;
+    const courses = await coursesService.listCourses(limit, offset);
+    const baseUrl = `${request.protocol}://${request.headers.host}`;
+    const mapped = courses.map((c: any) => ({
+      ...c,
+      thumbnail: c.thumbnail ? `${baseUrl}/api/v1/courses/${c.id}/thumbnail` : null,
+    }));
+    return reply.send({ data: mapped });
   },
 
   async getCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
@@ -98,13 +106,24 @@ export const coursesController = {
     if (!course) {
       return reply.status(404).send({ message: 'Course not found' });
     }
-    return reply.send({ data: course });
+    const baseUrl = `${request.protocol}://${request.headers.host}`;
+    const data = {
+      ...course,
+      thumbnail: course.thumbnail ? `${baseUrl}/api/v1/courses/${course.id}/thumbnail` : null,
+    };
+    return reply.send({ data });
   },
 
   async createCourse(request: FastifyRequest<{ Body: CreateCourseInput }>, reply: FastifyReply) {
     const adminId = (request.user as any)?.id;
     const course = await coursesService.createCourse(request.body, adminId, request.ip);
-    return reply.status(201).send({ data: course });
+    const baseUrl = `${request.protocol}://${request.headers.host}`;
+    return reply.status(201).send({
+      data: {
+        ...course,
+        thumbnail: course.thumbnail ? `${baseUrl}/api/v1/courses/${course.id}/thumbnail` : null,
+      },
+    });
   },
 
   async updateCourse(request: FastifyRequest<{ Params: { id: number }; Body: UpdateCourseInput }>, reply: FastifyReply) {
@@ -113,7 +132,13 @@ export const coursesController = {
     if (!course) {
       return reply.status(404).send({ message: 'Course not found' });
     }
-    return reply.send({ data: course });
+    const baseUrl = `${request.protocol}://${request.headers.host}`;
+    return reply.send({
+      data: {
+        ...course,
+        thumbnail: course.thumbnail ? `${baseUrl}/api/v1/courses/${course.id}/thumbnail` : null,
+      },
+    });
   },
 
   async deleteCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
@@ -123,5 +148,18 @@ export const coursesController = {
       return reply.status(404).send({ message: 'Course not found' });
     }
     return reply.send({ message: 'Course deleted successfully' });
+  },
+
+  async getCourseThumbnail(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    const course = await coursesService.getCourse(request.params.id);
+    if (!course || !course.thumbnail) {
+      return reply.status(404).send({ message: 'Thumbnail not found' });
+    }
+    const mimeType = course.thumbnailMimeType || 'image/jpeg';
+    const buffer = Buffer.from(course.thumbnail, 'base64');
+    return reply
+      .header('Content-Type', mimeType)
+      .header('Cache-Control', 'public, max-age=86400')
+      .send(buffer);
   },
 };

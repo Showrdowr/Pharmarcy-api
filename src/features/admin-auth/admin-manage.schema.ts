@@ -25,3 +25,13 @@ export const deleteAdminBodySchema = z.object({
 });
 
 export type DeleteAdminBody = z.infer<typeof deleteAdminBodySchema>;
+
+// Schema for updating admin user
+export const updateAdminUserSchema = z.object({
+  email: z.string().email('กรุณากรอกอีเมลที่ถูกต้อง').optional(),
+  department: z.string().min(2).optional(),
+  major: z.string().optional(),
+  role: z.string().optional(),
+});
+
+export type UpdateAdminUserInput = z.infer<typeof updateAdminUserSchema>;

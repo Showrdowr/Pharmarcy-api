@@ -18,8 +18,8 @@ export const authService = {
   },
 
   async register(data: RegisterInput) {
-    console.log('Checking for existing user:', { email: data.email, fullName: data.fullName });
-    
+
+
     // Check Full Name
     const existingName = await userRepository.findByFullName(data.fullName);
     if (existingName) {
@@ -32,14 +32,14 @@ export const authService = {
       throw Object.assign(new Error('สมัครสมาชิกล้มเหลว:อีเมลซ้ำ'), { statusCode: 409 });
     }
 
-    console.log('Hashing password...');
+
     const passwordHash = await bcrypt.hash(data.password, 10);
 
     // Cast string role to enum type as expected by repository/schema
     // In a real app we might validate against the enum values at runtime too
     const role = data.role as "member" | "pharmacist" | "admin";
 
-    console.log('Creating user in DB...', { ...data, password: '***' });
+
     const user = await userRepository.create({
       fullName: data.fullName,
       email: data.email,
@@ -47,7 +47,7 @@ export const authService = {
       role,
       professionalLicenseNumber: data.professionalLicenseNumber,
     });
-    console.log('User created:', user);
+
 
     return user;
   },
