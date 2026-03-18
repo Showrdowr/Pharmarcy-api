@@ -1,7 +1,7 @@
 import { pgTable, serial, varchar, text, integer, numeric, timestamp, boolean, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { users } from './users.js';
-import { courses } from './courses.js';
+import { users } from './users';
+import { courses } from './courses';
 
 // Enums
 export const orderStatusEnum = pgEnum('order_status', ['PENDING', 'PAID', 'CANCELLED', 'REFUNDED']);

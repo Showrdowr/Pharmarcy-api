@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { db } from './src/db/index.js';
 import { roles, adminUserRoles, adminUser } from './src/db/schema/index.js';
 import { eq } from 'drizzle-orm';

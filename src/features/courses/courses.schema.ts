@@ -25,6 +25,7 @@ export const createCourseSchema = z.object({
   subcategoryId: z.number().optional().nullable(),
   title: z.string().min(1).max(255),
   description: z.string().optional().nullable(),
+  details: z.string().optional().nullable(),
   authorName: z.string().max(255).optional().nullable(),
   price: z.number().min(0).optional().nullable(),
   thumbnail: z.string().optional().nullable(),
@@ -32,6 +33,10 @@ export const createCourseSchema = z.object({
   previewVideoId: z.number().optional().nullable(),
   cpeCredits: z.number().min(0).optional().nullable(),
   conferenceCode: z.string().max(255).optional().nullable(),
+  language: z.string().max(50).optional().nullable(),
+  skillLevel: z.string().max(50).optional().nullable().default('ALL'),
+  hasCertificate: z.boolean().optional().nullable().default(false),
+  enrollmentDeadline: z.string().optional().nullable(),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).default('DRAFT'),
 });
 

@@ -42,6 +42,7 @@ export const courses = pgTable('courses', {
   subcategoryId: integer('subcategory_id').references(() => subcategories.id, { onDelete: 'set null' }),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
+  details: text('details'),
   authorName: varchar('author_name', { length: 255 }),
   price: numeric('price', { precision: 10, scale: 2 }),
   thumbnail: text('thumbnail'), // Reverting to text as placeholder or if it's base64. 
@@ -49,6 +50,10 @@ export const courses = pgTable('courses', {
   previewVideoId: integer('preview_video_id').references(() => videos.id),
   cpeCredits: integer('cpe_credits').default(0),
   conferenceCode: varchar('conference_code', { length: 255 }),
+  language: varchar('language', { length: 50 }),
+  skillLevel: varchar('skill_level', { length: 50 }).default('ALL'),
+  hasCertificate: boolean('has_certificate').default(false),
+  enrollmentDeadline: timestamp('enrollment_deadline', { withTimezone: true }),
   status: courseStatusEnum('status').notNull().default('DRAFT'),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
