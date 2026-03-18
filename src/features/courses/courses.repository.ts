@@ -112,6 +112,7 @@ export const coursesRepository = {
     const [result] = await db.insert(courses).values({
       ...data,
       price: data.price ? data.price.toString() : null,
+      enrollmentDeadline: data.enrollmentDeadline ? new Date(data.enrollmentDeadline) : null,
     }).returning();
     return result;
   },
@@ -122,6 +123,7 @@ export const coursesRepository = {
       .set({
         ...data,
         price: data.price ? data.price.toString() : undefined,
+        enrollmentDeadline: data.enrollmentDeadline ? new Date(data.enrollmentDeadline) : undefined,
         updatedAt: new Date(),
       })
       .where(eq(courses.id, id))
