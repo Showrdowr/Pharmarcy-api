@@ -1,4 +1,3 @@
-process.env.TZ = 'Asia/Bangkok';
 import { buildApp } from './app.js';
 import { env } from './config/env.js';
 

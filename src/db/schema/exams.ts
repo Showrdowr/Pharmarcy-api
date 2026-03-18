@@ -1,7 +1,7 @@
 import { pgTable, serial, varchar, text, integer, numeric, timestamp, boolean, jsonb, index, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { users } from './users';
-import { courses, questionTypeEnum } from './courses';
+import { users } from './users.js';
+import { courses, questionTypeEnum } from './courses.js';
 
 // Exam attempt status enum
 export const examAttemptStatusEnum = pgEnum('exam_attempt_status', ['IN_PROGRESS', 'SUBMITTED', 'GRADED']);

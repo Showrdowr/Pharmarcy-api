@@ -1,0 +1,6 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+releaseCommand = "npm run db:migrate"

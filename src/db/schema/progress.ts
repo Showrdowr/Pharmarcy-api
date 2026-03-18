@@ -1,7 +1,7 @@
 import { pgTable, serial, varchar, integer, numeric, timestamp, boolean, text } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { users } from './users';
-import { courses, lessons, videoQuestions } from './courses';
+import { users } from './users.js';
+import { courses, lessons, videoQuestions } from './courses.js';
 
 // Enrollments table
 export const enrollments = pgTable('enrollments', {
