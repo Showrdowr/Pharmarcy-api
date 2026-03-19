@@ -137,4 +137,17 @@ export const coursesController = {
     }
     return reply.send({ message: 'Course deleted successfully' });
   },
+
+  async listMyEnrolledCourses(request: FastifyRequest, reply: FastifyReply) {
+    const userPayload = request.user as { id: number };
+    const enrolled = await coursesService.getEnrolledCourses(userPayload.id);
+    return reply.send({ data: enrolled });
+  },
+
+  async enrollCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    const userPayload = request.user as { id: number };
+    const courseId = request.params.id;
+    const enrollment = await coursesService.enrollCourse(userPayload.id, courseId);
+    return reply.status(201).send({ data: enrollment });
+  },
 };

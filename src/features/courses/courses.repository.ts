@@ -1,5 +1,6 @@
 import { db } from '../../db/index.js';
 import { categories, subcategories, courses } from '../../db/schema/index.js';
+import { enrollments } from '../../db/schema/index.js';
 import { eq, and, desc } from 'drizzle-orm';
 import type { 
   CreateCategoryInput, 
@@ -161,6 +162,39 @@ export const coursesRepository = {
 
   async deleteCourse(id: number) {
     const [result] = await db.delete(courses).where(eq(courses.id, id)).returning();
+    return result;
+  },
+
+  // Enrolled courses for a user
+  async getEnrolledCourses(userId: number) {
+    return await db.query.enrollments.findMany({
+      where: eq(enrollments.userId, userId),
+      with: {
+        course: {
+          with: {
+            category: true,
+            lessons: true,
+          },
+        },
+      },
+      orderBy: [desc(enrollments.enrolledAt)],
+    });
+  },
+
+  // Enroll a user in a course
+  async enrollCourse(userId: number, courseId: number) {
+    // Check if already enrolled
+    const existing = await db.query.enrollments.findFirst({
+      where: and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)),
+    });
+    if (existing) return existing;
+
+    const [result] = await db.insert(enrollments).values({
+      userId,
+      courseId,
+      progressPercent: '0.00',
+      isCompleted: false,
+    }).returning();
     return result;
   },
 };

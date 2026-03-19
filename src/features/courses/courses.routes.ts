@@ -85,6 +85,15 @@ export async function coursesRoutes(app: FastifyInstance) {
       handler: coursesController.listCourses,
     });
 
+    // Enrolled courses for current user (must be before :id route)
+    typedApp.get('/courses/my-courses', {
+      schema: {
+        tags: ['Courses'],
+        summary: 'List my enrolled courses',
+      },
+      handler: coursesController.listMyEnrolledCourses,
+    });
+
     typedApp.get('/courses/:id', {
       schema: {
         tags: ['Courses'],
@@ -92,6 +101,16 @@ export async function coursesRoutes(app: FastifyInstance) {
         params: courseParamsSchema,
       },
       handler: coursesController.getCourse,
+    });
+
+    // Enroll in a course
+    typedApp.post('/courses/:id/enroll', {
+      schema: {
+        tags: ['Courses'],
+        summary: 'Enroll in a course',
+        params: courseParamsSchema,
+      },
+      handler: coursesController.enrollCourse,
     });
 
     // Admin only Category routes

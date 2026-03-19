@@ -195,4 +195,18 @@ export const coursesService = {
     }
     return result;
   },
+
+  // Enrolled courses for a user
+  async getEnrolledCourses(userId: number) {
+    const enrolledList = await coursesRepository.getEnrolledCourses(userId);
+    return enrolledList.map((enrollment) => ({
+      ...enrollment,
+      course: enrollment.course ? normalizeCourseThumbnail(enrollment.course) : enrollment.course,
+    }));
+  },
+
+  // Enroll a user in a course
+  async enrollCourse(userId: number, courseId: number) {
+    return await coursesRepository.enrollCourse(userId, courseId);
+  },
 };
