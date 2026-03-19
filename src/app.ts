@@ -13,6 +13,7 @@ import {
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
+    bodyLimit: 8 * 1024 * 1024,
     logger: {
       level: env.LOG_LEVEL,
       transport:

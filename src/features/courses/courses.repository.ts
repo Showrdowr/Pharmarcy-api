@@ -1,6 +1,6 @@
 import { db } from '../../db/index.js';
 import { categories, subcategories, courses } from '../../db/schema/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import type { 
   CreateCategoryInput, 
   UpdateCategoryInput,
@@ -91,9 +91,37 @@ export const coursesRepository = {
     });
   },
 
+  async listPublishedCourses() {
+    return await db.query.courses.findMany({
+      where: eq(courses.status, 'PUBLISHED'),
+      with: {
+        category: true,
+        subcategory: true,
+      },
+      orderBy: [desc(courses.createdAt)],
+    });
+  },
+
   async getCourseById(id: number) {
     return await db.query.courses.findFirst({
       where: eq(courses.id, id),
+      with: {
+        category: true,
+        subcategory: true,
+        previewVideo: true,
+        lessons: {
+          with: {
+            video: true,
+            videoQuestions: true,
+          },
+        },
+      },
+    });
+  },
+
+  async getPublishedCourseById(id: number) {
+    return await db.query.courses.findFirst({
+      where: and(eq(courses.id, id), eq(courses.status, 'PUBLISHED')),
       with: {
         category: true,
         subcategory: true,

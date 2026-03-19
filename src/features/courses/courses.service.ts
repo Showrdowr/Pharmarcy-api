@@ -1,5 +1,10 @@
 import { coursesRepository } from './courses.repository.js';
 import { auditLogsService } from '../audit-logs/audit-logs.service.js';
+import {
+  normalizeCourseThumbnail,
+  normalizeThumbnailForStorage,
+  validateThumbnailSizeLimit,
+} from './courses.utils.js';
 import type { 
   CreateCategoryInput, 
   UpdateCategoryInput,
@@ -120,15 +125,29 @@ export const coursesService = {
 
   // Course logic
   async listCourses() {
-    return await coursesRepository.listCourses();
+    const courses = await coursesRepository.listCourses();
+    return courses.map((course) => normalizeCourseThumbnail(course));
+  },
+
+  async listPublishedCourses() {
+    const courses = await coursesRepository.listPublishedCourses();
+    return courses.map((course) => normalizeCourseThumbnail(course));
   },
 
   async getCourse(id: number) {
-    return await coursesRepository.getCourseById(id);
+    const course = await coursesRepository.getCourseById(id);
+    return course ? normalizeCourseThumbnail(course) : null;
+  },
+
+  async getPublishedCourse(id: number) {
+    const course = await coursesRepository.getPublishedCourseById(id);
+    return course ? normalizeCourseThumbnail(course) : null;
   },
 
   async createCourse(data: CreateCourseInput, adminId?: string, ipAddress?: string) {
-    const course = await coursesRepository.createCourse(data);
+    validateThumbnailSizeLimit(data.thumbnail);
+    const payload = normalizeThumbnailForStorage(data);
+    const course = await coursesRepository.createCourse(payload);
     if (adminId) {
       void auditLogsService.recordAction({
         adminId,
@@ -138,12 +157,17 @@ export const coursesService = {
         ipAddress,
       });
     }
-    return course;
+    return normalizeCourseThumbnail(course);
   },
 
   async updateCourse(id: number, data: UpdateCourseInput, adminId?: string, ipAddress?: string) {
+    if (typeof data.thumbnail === 'string') {
+      validateThumbnailSizeLimit(data.thumbnail);
+    }
+
+    const payload = normalizeThumbnailForStorage(data);
     const oldCourse = await coursesRepository.getCourseById(id);
-    const course = await coursesRepository.updateCourse(id, data);
+    const course = await coursesRepository.updateCourse(id, payload);
     if (adminId && course) {
       void auditLogsService.recordAction({
         adminId,
@@ -154,7 +178,7 @@ export const coursesService = {
         ipAddress,
       });
     }
-    return course;
+    return course ? normalizeCourseThumbnail(course) : null;
   },
 
   async deleteCourse(id: number, adminId?: string, ipAddress?: string) {

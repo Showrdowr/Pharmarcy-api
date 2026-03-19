@@ -88,6 +88,19 @@ export const coursesController = {
   },
 
   // Course handlers
+  async listPublicCourses(request: FastifyRequest, reply: FastifyReply) {
+    const courses = await coursesService.listPublishedCourses();
+    return reply.send({ data: courses });
+  },
+
+  async getPublicCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    const course = await coursesService.getPublishedCourse(request.params.id);
+    if (!course) {
+      return reply.status(404).send({ message: 'Course not found' });
+    }
+    return reply.send({ data: course });
+  },
+
   async listCourses(request: FastifyRequest, reply: FastifyReply) {
     const courses = await coursesService.listCourses();
     return reply.send({ data: courses });
