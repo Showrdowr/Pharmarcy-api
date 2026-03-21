@@ -32,6 +32,7 @@ export function errorHandler(
   const statusCode = error.statusCode || 500;
   return reply.status(statusCode).send({
     statusCode,
+    code: (error as FastifyError & { code?: string }).code,
     error: error.name || 'Internal Server Error',
     message: error.message || 'An unexpected error occurred',
   });

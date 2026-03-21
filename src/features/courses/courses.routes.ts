@@ -9,8 +9,40 @@ import {
   updateSubcategorySchema,
   createCourseSchema,
   updateCourseSchema,
-  categoryParamsSchema as courseParamsSchema,
   categoryParamsSchema,
+  courseListQuerySchema,
+  courseParamsSchema,
+  courseIdParamsSchema,
+  createLessonSchema,
+  updateLessonSchema,
+  lessonIdParamsSchema,
+  createLessonDocumentSchema,
+  lessonDocumentIdParamsSchema,
+  createVideoQuestionSchema,
+  createVideoQuestionBulkSchema,
+  updateVideoQuestionSchema,
+  createVideoQuestionAnswerSchema,
+  videoQuestionIdParamsSchema,
+  updateLessonProgressSchema,
+  updateCourseRelatedSchema,
+  createLessonQuizSchema,
+  updateLessonQuizSchema,
+  lessonQuizIdParamsSchema,
+  createLessonQuizQuestionSchema,
+  lessonQuizQuestionIdParamsSchema,
+  updateLessonQuizQuestionSchema,
+  createExamSchema,
+  updateExamSchema,
+  examIdParamsSchema,
+  createExamQuestionSchema,
+  updateExamQuestionSchema,
+  examQuestionIdParamsSchema,
+  createVideoUploadInitiateSchema,
+  completeVideoUploadSchema,
+  videoIdParamsSchema,
+  videoListQuerySchema,
+  resolveVimeoVideoSchema,
+  importVimeoVideoSchema,
 } from './courses.schema.js';
 
 export async function coursesRoutes(app: FastifyInstance) {
@@ -21,8 +53,17 @@ export async function coursesRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Public - Courses'],
         summary: 'List published courses',
+        querystring: courseListQuerySchema,
       },
       handler: coursesController.listPublicCourses,
+    });
+
+    typedPublicApp.get('/public/categories', {
+      schema: {
+        tags: ['Public - Categories'],
+        summary: 'List public categories with published course counts',
+      },
+      handler: coursesController.listPublicCategories,
     });
 
     typedPublicApp.get('/public/courses/:id', {
@@ -81,8 +122,17 @@ export async function coursesRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Courses'],
         summary: 'List all courses',
+        querystring: courseListQuerySchema,
       },
       handler: coursesController.listCourses,
+    });
+
+    typedApp.get('/courses/enrolled', {
+      schema: {
+        tags: ['Courses'],
+        summary: 'List enrolled courses for current user',
+      },
+      handler: coursesController.listEnrolledCourses,
     });
 
     typedApp.get('/courses/:id', {
@@ -92,6 +142,65 @@ export async function coursesRoutes(app: FastifyInstance) {
         params: courseParamsSchema,
       },
       handler: coursesController.getCourse,
+    });
+
+    typedApp.get('/courses/:id/learning', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Get enrolled course learning data',
+        params: courseParamsSchema,
+      },
+      handler: coursesController.getCourseLearning,
+    });
+
+    typedApp.get('/courses/:id/progress', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Get enrolled course progress',
+        params: courseParamsSchema,
+      },
+      handler: coursesController.getCourseProgress,
+    });
+
+    typedApp.post('/courses/:id/enroll', {
+      schema: {
+        tags: ['Courses'],
+        summary: 'Enroll current user to a course',
+        params: courseParamsSchema,
+      },
+      handler: coursesController.enrollCourse,
+    });
+
+    typedApp.post('/courses/:courseId/lessons/:lessonId/complete', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Mark lesson as complete for enrolled user',
+        params: z.object({
+          courseId: z.string().transform((val) => parseInt(val, 10)),
+          lessonId: z.string().transform((val) => parseInt(val, 10)),
+        }),
+      },
+      handler: coursesController.completeLesson,
+    });
+
+    typedApp.patch('/lessons/:id/progress', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Update lesson playback progress',
+        params: lessonIdParamsSchema,
+        body: updateLessonProgressSchema,
+      },
+      handler: coursesController.updateLessonProgress,
+    });
+
+    typedApp.post('/video-questions/:id/answer', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Submit answer for an interactive video question',
+        params: videoQuestionIdParamsSchema,
+        body: createVideoQuestionAnswerSchema,
+      },
+      handler: coursesController.answerVideoQuestion,
     });
 
     // Admin only Category routes
@@ -185,6 +294,299 @@ export async function coursesRoutes(app: FastifyInstance) {
           params: courseParamsSchema,
         },
         handler: coursesController.deleteCourse,
+      });
+
+      typedAdminApp.put('/courses/:id/related', {
+        schema: {
+          tags: ['Admin - Courses'],
+          summary: 'Replace related courses (Admin only)',
+          params: courseParamsSchema,
+          body: updateCourseRelatedSchema,
+        },
+        handler: coursesController.replaceRelatedCourses,
+      });
+
+      typedAdminApp.get('/courses/:courseId/lessons', {
+        schema: {
+          tags: ['Admin - Lessons'],
+          summary: 'List lessons by course (Admin only)',
+          params: courseIdParamsSchema,
+        },
+        handler: coursesController.listLessons,
+      });
+
+      typedAdminApp.post('/courses/:courseId/lessons', {
+        schema: {
+          tags: ['Admin - Lessons'],
+          summary: 'Create lesson (Admin only)',
+          params: courseIdParamsSchema,
+          body: createLessonSchema,
+        },
+        handler: coursesController.createLesson,
+      });
+
+      typedAdminApp.put('/lessons/:id', {
+        schema: {
+          tags: ['Admin - Lessons'],
+          summary: 'Update lesson (Admin only)',
+          params: lessonIdParamsSchema,
+          body: updateLessonSchema,
+        },
+        handler: coursesController.updateLesson,
+      });
+
+      typedAdminApp.delete('/lessons/:id', {
+        schema: {
+          tags: ['Admin - Lessons'],
+          summary: 'Delete lesson (Admin only)',
+          params: lessonIdParamsSchema,
+        },
+        handler: coursesController.deleteLesson,
+      });
+
+      typedAdminApp.post('/lessons/:id/documents', {
+        schema: {
+          tags: ['Admin - Lesson Documents'],
+          summary: 'Add lesson document (Admin only)',
+          params: lessonIdParamsSchema,
+          body: createLessonDocumentSchema,
+        },
+        handler: coursesController.addLessonDocument,
+      });
+
+      typedAdminApp.delete('/lesson-documents/:id', {
+        schema: {
+          tags: ['Admin - Lesson Documents'],
+          summary: 'Delete lesson document (Admin only)',
+          params: lessonDocumentIdParamsSchema,
+        },
+        handler: coursesController.deleteLessonDocument,
+      });
+
+      typedAdminApp.post('/lessons/:id/video-questions', {
+        schema: {
+          tags: ['Admin - Video Questions'],
+          summary: 'Add interactive video question (Admin only)',
+          params: lessonIdParamsSchema,
+          body: createVideoQuestionSchema,
+        },
+        handler: coursesController.addVideoQuestion,
+      });
+
+      typedAdminApp.post('/lessons/:id/video-questions/bulk', {
+        schema: {
+          tags: ['Admin - Video Questions'],
+          summary: 'Bulk import interactive video questions (Admin only)',
+          params: lessonIdParamsSchema,
+          body: createVideoQuestionBulkSchema,
+        },
+        handler: coursesController.addVideoQuestionsBulk,
+      });
+
+      typedAdminApp.delete('/video-questions/:id', {
+        schema: {
+          tags: ['Admin - Video Questions'],
+          summary: 'Delete interactive video question (Admin only)',
+          params: videoQuestionIdParamsSchema,
+        },
+        handler: coursesController.deleteVideoQuestion,
+      });
+
+      typedAdminApp.put('/video-questions/:id', {
+        schema: {
+          tags: ['Admin - Video Questions'],
+          summary: 'Update interactive video question (Admin only)',
+          params: videoQuestionIdParamsSchema,
+          body: updateVideoQuestionSchema,
+        },
+        handler: coursesController.updateVideoQuestion,
+      });
+
+      typedAdminApp.get('/lessons/:id/quiz', {
+        schema: {
+          tags: ['Admin - Lesson Quiz'],
+          summary: 'Get lesson quiz (Admin only)',
+          params: lessonIdParamsSchema,
+        },
+        handler: coursesController.getLessonQuiz,
+      });
+
+      typedAdminApp.put('/lessons/:id/quiz', {
+        schema: {
+          tags: ['Admin - Lesson Quiz'],
+          summary: 'Create or update lesson quiz (Admin only)',
+          params: lessonIdParamsSchema,
+          body: updateLessonQuizSchema.or(createLessonQuizSchema),
+        },
+        handler: coursesController.upsertLessonQuiz,
+      });
+
+      typedAdminApp.post('/lesson-quizzes/:quizId/questions', {
+        schema: {
+          tags: ['Admin - Lesson Quiz'],
+          summary: 'Add lesson quiz question (Admin only)',
+          params: lessonQuizIdParamsSchema,
+          body: createLessonQuizQuestionSchema,
+        },
+        handler: coursesController.createLessonQuizQuestion,
+      });
+
+      typedAdminApp.put('/lesson-quiz-questions/:questionId', {
+        schema: {
+          tags: ['Admin - Lesson Quiz'],
+          summary: 'Update lesson quiz question (Admin only)',
+          params: lessonQuizQuestionIdParamsSchema,
+          body: updateLessonQuizQuestionSchema,
+        },
+        handler: coursesController.updateLessonQuizQuestion,
+      });
+
+      typedAdminApp.delete('/lesson-quiz-questions/:questionId', {
+        schema: {
+          tags: ['Admin - Lesson Quiz'],
+          summary: 'Delete lesson quiz question (Admin only)',
+          params: lessonQuizQuestionIdParamsSchema,
+        },
+        handler: coursesController.deleteLessonQuizQuestion,
+      });
+
+      typedAdminApp.get('/courses/:courseId/exam', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Get course exam (Admin only)',
+          params: courseIdParamsSchema,
+        },
+        handler: coursesController.getExam,
+      });
+
+      typedAdminApp.post('/courses/:courseId/exam', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Create or update course exam (Admin only)',
+          params: courseIdParamsSchema,
+          body: createExamSchema,
+        },
+        handler: coursesController.saveExam,
+      });
+
+      typedAdminApp.put('/exams/:id', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Update exam (Admin only)',
+          params: examIdParamsSchema,
+          body: updateExamSchema,
+        },
+        handler: coursesController.updateExam,
+      });
+
+      typedAdminApp.delete('/exams/:id', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Delete exam (Admin only)',
+          params: examIdParamsSchema,
+        },
+        handler: coursesController.deleteExam,
+      });
+
+      typedAdminApp.post('/exams/:id/questions', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Add exam question (Admin only)',
+          params: examIdParamsSchema,
+          body: createExamQuestionSchema,
+        },
+        handler: coursesController.addExamQuestion,
+      });
+
+      typedAdminApp.put('/exam-questions/:id', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Update exam question (Admin only)',
+          params: examQuestionIdParamsSchema,
+          body: updateExamQuestionSchema,
+        },
+        handler: coursesController.updateExamQuestion,
+      });
+
+      typedAdminApp.delete('/exam-questions/:id', {
+        schema: {
+          tags: ['Admin - Exams'],
+          summary: 'Delete exam question (Admin only)',
+          params: examQuestionIdParamsSchema,
+        },
+        handler: coursesController.deleteExamQuestion,
+      });
+
+      typedAdminApp.post('/videos/vimeo/initiate', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Initiate video upload (Admin only)',
+          body: createVideoUploadInitiateSchema,
+        },
+        handler: coursesController.initiateVideoUpload,
+      });
+
+      typedAdminApp.get('/videos', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'List videos with usage and status (Admin only)',
+          querystring: videoListQuerySchema,
+        },
+        handler: coursesController.listVideos,
+      });
+
+      typedAdminApp.get('/videos/:id', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Get video by ID with usage summary (Admin only)',
+          params: videoIdParamsSchema,
+        },
+        handler: coursesController.getVideo,
+      });
+
+      typedAdminApp.post('/videos/vimeo/complete', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Complete video upload (Admin only)',
+          body: completeVideoUploadSchema,
+        },
+        handler: coursesController.completeVideoUpload,
+      });
+
+      typedAdminApp.post('/videos/vimeo/resolve', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Resolve existing Vimeo video metadata (Admin only)',
+          body: resolveVimeoVideoSchema,
+        },
+        handler: coursesController.resolveVimeoVideo,
+      });
+
+      typedAdminApp.post('/videos/vimeo/import', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Import existing Vimeo video into system (Admin only)',
+          body: importVimeoVideoSchema,
+        },
+        handler: coursesController.importVimeoVideo,
+      });
+
+      typedAdminApp.delete('/videos/:id', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Delete video (Admin only)',
+          params: videoIdParamsSchema,
+        },
+        handler: coursesController.deleteVideo,
+      });
+
+      typedAdminApp.post('/videos/:id/sync-status', {
+        schema: {
+          tags: ['Admin - Videos'],
+          summary: 'Sync Vimeo video status from provider (Admin only)',
+          params: videoIdParamsSchema,
+        },
+        handler: coursesController.syncVideoStatus,
       });
     });
   });

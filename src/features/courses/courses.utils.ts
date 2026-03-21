@@ -5,6 +5,10 @@ const BASE64_PATTERN = /^[A-Za-z0-9+/=\r\n]+$/;
 const DEFAULT_IMAGE_MIME = 'image/jpeg';
 export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
 
+// Thumbnail storage remains DB-backed in this phase:
+// we store raw base64 in `courses.thumbnail` and MIME type in `courses.thumbnail_mime_type`,
+// then reconstruct a data URI only when returning course payloads to clients.
+
 function sanitizeBase64(value: string): string {
   return value.replace(/\s+/g, '');
 }

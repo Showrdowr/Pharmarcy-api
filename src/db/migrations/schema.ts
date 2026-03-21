@@ -8,6 +8,7 @@ export const questionType = pgEnum("question_type", ['MULTIPLE_CHOICE', 'TRUE_FA
 export const transactionStatus = pgEnum("transaction_status", ['PENDING', 'SUCCESS', 'FAILED'])
 export const userRole = pgEnum("user_role", ['member', 'pharmacist', 'admin'])
 export const videoProvider = pgEnum("video_provider", ['YOUTUBE', 'VIMEO', 'CLOUDFLARE', 'S3'])
+export const videoStatus = pgEnum("video_status", ['PROCESSING', 'READY', 'FAILED'])
 
 
 export const lessons = pgTable("lessons", {
@@ -66,7 +67,10 @@ export const videos = pgTable("videos", {
 	provider: videoProvider().notNull(),
 	resourceId: varchar("resource_id", { length: 255 }).notNull(),
 	duration: integer(),
+	playbackUrl: text("playback_url"),
+	status: videoStatus().default('PROCESSING').notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 });
 
 export const categories = pgTable("categories", {

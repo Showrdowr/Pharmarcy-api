@@ -34,7 +34,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Register plugins
   await app.register(cors, {
     origin: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
   await registerSwagger(app);
   await registerJwt(app);

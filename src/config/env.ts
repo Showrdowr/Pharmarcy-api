@@ -16,6 +16,8 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   SMTP_USER: z.string().email().optional(),
   SMTP_PASS: z.string().optional(),
+  VIMEO_ACCESS_TOKEN: z.string().min(1).optional(),
+  VIMEO_ALLOWED_EMBED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3002'),
 });
 
 export const env = envSchema.parse(process.env);

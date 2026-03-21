@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, integer, numeric, timestamp, boolean, text } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, integer, numeric, timestamp, boolean, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { users } from './users.js';
 import { courses, lessons, videoQuestions } from './courses.js';
@@ -12,7 +12,9 @@ export const enrollments = pgTable('enrollments', {
   isCompleted: boolean('is_completed').default(false),
   enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow(),
   lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
-});
+}, (table) => ({
+  enrollmentsUserCourseUnique: uniqueIndex('enrollments_user_course_unique_idx').on(table.userId, table.courseId),
+}));
 
 // Certificates table
 export const certificates = pgTable('certificates', {
@@ -31,17 +33,22 @@ export const userLessonProgress = pgTable('user_lesson_progress', {
   lastWatchedSeconds: integer('last_watched_seconds').default(0),
   isCompleted: boolean('is_completed').default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  userLessonProgressUserLessonUnique: uniqueIndex('user_lesson_progress_user_lesson_unique_idx').on(table.userId, table.lessonId),
+}));
 
 // User Video Answers table
 export const userVideoAnswers = pgTable('user_video_answers', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
   videoQuestionId: integer('video_question_id').notNull().references(() => videoQuestions.id),
-  answerGiven: text('answer_given'), // Added text to imports if missing, but used varchar for simplicity if needed. Docker said text.
+  answerGiven: text('answer_given'),
   isCorrect: boolean('is_correct'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-});
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  userVideoAnswersUserQuestionUnique: uniqueIndex('user_video_answers_user_question_unique_idx').on(table.userId, table.videoQuestionId),
+}));
 
 
 
