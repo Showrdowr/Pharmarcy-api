@@ -15,6 +15,13 @@
       "when": 1774093200000,
       "tag": "0001_add_playback_url_to_videos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775000000000,
+      "tag": "0002_add_enrollment_learning_state",
+      "breakpoints": true
     }
   ]
 }

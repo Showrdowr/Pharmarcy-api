@@ -6,6 +6,8 @@ import { userService } from './user.service.js';
 import { createUserSchema, updateUserSchema, userParamsSchema } from './user.schema.js';
 
 export async function userRoutes(app: FastifyInstance) {
+  app.addHook('onRequest', app.requireRole('admin', 'super_admin'));
+
   app.withTypeProvider<ZodTypeProvider>().get('/users', {
     schema: {
       tags: ['Users'],
@@ -24,6 +26,15 @@ export async function userRoutes(app: FastifyInstance) {
       const result = await userService.getAllUsers({ role, limit, offset, search, status });
       return reply.send({ data: result });
     },
+  });
+
+  app.withTypeProvider<ZodTypeProvider>().get('/users/:id/overview', {
+    schema: {
+      tags: ['Users'],
+      summary: 'Get user overview for backoffice',
+      params: userParamsSchema,
+    },
+    handler: userController.getOverview,
   });
 
   app.withTypeProvider<ZodTypeProvider>().get('/users/:id', {

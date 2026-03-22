@@ -224,9 +224,11 @@ export const enrollments = pgTable("enrollments", {
 	userId: integer("user_id").notNull(),
 	courseId: integer("course_id").notNull(),
 	progressPercent: numeric("progress_percent", { precision: 5, scale:  2 }).default('0.00'),
+	watchPercent: numeric("watch_percent", { precision: 5, scale:  2 }).default('0.00'),
 	isCompleted: boolean("is_completed").default(false),
 	enrolledAt: timestamp("enrolled_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true, mode: 'string' }),
+	lastAccessedLessonId: integer("last_accessed_lesson_id"),
 }, (table) => [
 	foreignKey({
 			columns: [table.userId],
@@ -238,6 +240,11 @@ export const enrollments = pgTable("enrollments", {
 			foreignColumns: [courses.id],
 			name: "enrollments_course_id_courses_id_fk"
 		}),
+	foreignKey({
+			columns: [table.lastAccessedLessonId],
+			foreignColumns: [lessons.id],
+			name: "enrollments_last_accessed_lesson_id_lessons_id_fk"
+		}).onDelete("set null"),
 ]);
 
 export const certificates = pgTable("certificates", {

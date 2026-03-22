@@ -6,7 +6,7 @@ process.env.PORT ??= '3001';
 process.env.LOG_LEVEL ??= 'fatal';
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { and, count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app.js';
 import { db } from '../../db/index.js';
@@ -51,6 +51,36 @@ type SeededLearningFixture = {
 let app: FastifyInstance;
 let fixtureCounter = 0;
 const createdFixtures: SeededLearningFixture[] = [];
+
+async function ensureEnrollmentLearningStateColumns() {
+  await db.execute(sql`
+    ALTER TABLE "enrollments"
+    ADD COLUMN IF NOT EXISTS "watch_percent" numeric(5, 2) DEFAULT '0.00'
+  `);
+
+  await db.execute(sql`
+    ALTER TABLE "enrollments"
+    ADD COLUMN IF NOT EXISTS "last_accessed_lesson_id" integer
+  `);
+
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'enrollments_last_accessed_lesson_id_lessons_id_fk'
+      ) THEN
+        ALTER TABLE "enrollments"
+        ADD CONSTRAINT "enrollments_last_accessed_lesson_id_lessons_id_fk"
+        FOREIGN KEY ("last_accessed_lesson_id")
+        REFERENCES "lessons"("id")
+        ON DELETE SET NULL;
+      END IF;
+    END
+    $$;
+  `);
+}
 
 function createSuffix() {
   fixtureCounter += 1;
@@ -269,6 +299,7 @@ async function seedLearningFixture() {
 
 describe.sequential('courses learning integration', () => {
   beforeAll(async () => {
+    await ensureEnrollmentLearningStateColumns();
     app = await buildApp();
     await app.ready();
   });

@@ -1,13 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const dbMocks = vi.hoisted(() => ({
+  transaction: vi.fn(async (callback: (tx: Record<string, unknown>) => Promise<unknown>) => callback({ kind: 'tx' })),
+}));
+
 const repositoryMocks = vi.hoisted(() => ({
-  getPublishedCourseById: vi.fn(),
+  getCourseForLearner: vi.fn(),
   findEnrollment: vi.fn(),
   listUserLessonProgress: vi.fn(),
   listUserVideoAnswers: vi.fn(),
+  lockEnrollment: vi.fn(),
   touchEnrollment: vi.fn(),
   getVideoQuestionById: vi.fn(),
   upsertVideoQuestionAnswer: vi.fn(),
+}));
+
+vi.mock('../../db/index.js', () => ({
+  db: {
+    transaction: dbMocks.transaction,
+  },
 }));
 
 vi.mock('./courses.repository.js', () => ({
@@ -69,24 +80,29 @@ function createPublishedCourseFixture() {
 
 describe('coursesService learning side effects', () => {
   beforeEach(() => {
-    repositoryMocks.getPublishedCourseById.mockReset();
+    dbMocks.transaction.mockClear();
+    repositoryMocks.getCourseForLearner.mockReset();
     repositoryMocks.findEnrollment.mockReset();
     repositoryMocks.listUserLessonProgress.mockReset();
     repositoryMocks.listUserVideoAnswers.mockReset();
+    repositoryMocks.lockEnrollment.mockReset();
     repositoryMocks.touchEnrollment.mockReset();
     repositoryMocks.getVideoQuestionById.mockReset();
     repositoryMocks.upsertVideoQuestionAnswer.mockReset();
 
-    repositoryMocks.getPublishedCourseById.mockResolvedValue(createPublishedCourseFixture());
+    repositoryMocks.getCourseForLearner.mockResolvedValue(createPublishedCourseFixture());
     repositoryMocks.findEnrollment.mockResolvedValue({
       id: 1,
       userId: 99,
       courseId: 12,
+      lastAccessedLessonId: null,
       enrolledAt: '2026-03-01T00:00:00.000Z',
       lastAccessedAt: null,
     });
     repositoryMocks.listUserLessonProgress.mockResolvedValue([]);
     repositoryMocks.listUserVideoAnswers.mockResolvedValue([]);
+    repositoryMocks.lockEnrollment.mockResolvedValue(undefined);
+    repositoryMocks.touchEnrollment.mockResolvedValue(undefined);
   });
 
   it('does not touch enrollment when only reading the learning snapshot', async () => {
@@ -131,6 +147,6 @@ describe('coursesService learning side effects', () => {
       answerGiven: 'option-a',
       answered: true,
     });
-    expect(repositoryMocks.touchEnrollment).toHaveBeenCalledWith(99, 12);
+    expect(repositoryMocks.touchEnrollment).toHaveBeenCalledWith(99, 12, 1, { kind: 'tx' });
   });
 });

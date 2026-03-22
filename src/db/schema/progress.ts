@@ -9,9 +9,11 @@ export const enrollments = pgTable('enrollments', {
   userId: integer('user_id').notNull().references(() => users.id),
   courseId: integer('course_id').notNull().references(() => courses.id),
   progressPercent: numeric('progress_percent', { precision: 5, scale: 2 }).default('0.00'),
+  watchPercent: numeric('watch_percent', { precision: 5, scale: 2 }).default('0.00'),
   isCompleted: boolean('is_completed').default(false),
   enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow(),
   lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
+  lastAccessedLessonId: integer('last_accessed_lesson_id').references(() => lessons.id, { onDelete: 'set null' }),
 }, (table) => ({
   enrollmentsUserCourseUnique: uniqueIndex('enrollments_user_course_unique_idx').on(table.userId, table.courseId),
 }));
@@ -61,6 +63,10 @@ export const enrollmentsRelations = relations(enrollments, ({ one }) => ({
   course: one(courses, {
     fields: [enrollments.courseId],
     references: [courses.id],
+  }),
+  lastAccessedLesson: one(lessons, {
+    fields: [enrollments.lastAccessedLessonId],
+    references: [lessons.id],
   }),
 }));
 

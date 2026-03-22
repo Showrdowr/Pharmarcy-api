@@ -18,6 +18,7 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   VIMEO_ACCESS_TOKEN: z.string().min(1).optional(),
   VIMEO_ALLOWED_EMBED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3002'),
+  LEARNING_ALLOWED_PROGRESS_ADVANCE_SECONDS: z.coerce.number().int().positive().default(30),
 });
 
 export const env = envSchema.parse(process.env);

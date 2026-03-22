@@ -1,7 +1,9 @@
-import { eq, sql, and, count, ilike, or } from 'drizzle-orm';
+import { eq, sql, and, count, ilike, or, desc, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { users, NewUser, User } from '../../db/schema/users.js';
-import { enrollments } from '../../db/schema/progress.js';
+import { certificates, enrollments } from '../../db/schema/progress.js';
+import { courses } from '../../db/schema/courses.js';
+import { orderItems, orders } from '../../db/schema/orders.js';
 
 export const userRepository = {
   async findAll(): Promise<User[]> {
@@ -100,9 +102,111 @@ export const userRepository = {
     return stats;
   },
 
+  async getEarnedCpeCreditsByUserIds(userIds: number[]) {
+    if (userIds.length === 0) {
+      return new Map<number, number>();
+    }
+
+    const creditRows = await db
+      .select({
+        userId: certificates.userId,
+        totalCredits: sql<string>`coalesce(sum(${courses.cpeCredits}), 0)`,
+      })
+      .from(certificates)
+      .innerJoin(courses, eq(certificates.courseId, courses.id))
+      .where(inArray(certificates.userId, userIds))
+      .groupBy(certificates.userId);
+
+    return new Map(
+      creditRows.map((row) => [Number(row.userId), Number(row.totalCredits ?? 0)])
+    );
+  },
+
+  async getRoleCpeSummary(role: 'pharmacist') {
+    const [summary] = await db
+      .select({
+        totalCredits: sql<string>`coalesce(sum(${courses.cpeCredits}), 0)`,
+      })
+      .from(users)
+      .leftJoin(certificates, eq(certificates.userId, users.id))
+      .leftJoin(courses, eq(certificates.courseId, courses.id))
+      .where(eq(users.role, role));
+
+    return {
+      totalCredits: Number(summary?.totalCredits ?? 0),
+    };
+  },
+
   async findById(id: number): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
+  },
+
+  async listEnrollmentsByUserId(userId: number) {
+    return await db
+      .select({
+        enrollmentId: enrollments.id,
+        courseId: courses.id,
+        courseTitle: courses.title,
+        enrolledAt: enrollments.enrolledAt,
+        watchPercent: enrollments.watchPercent,
+        completionPercent: enrollments.progressPercent,
+        isCompleted: enrollments.isCompleted,
+        cpeCredits: courses.cpeCredits,
+        certificateCode: certificates.certificateCode,
+      })
+      .from(enrollments)
+      .innerJoin(courses, eq(enrollments.courseId, courses.id))
+      .leftJoin(
+        certificates,
+        and(eq(certificates.userId, userId), eq(certificates.courseId, courses.id))
+      )
+      .where(eq(enrollments.userId, userId))
+      .orderBy(desc(enrollments.enrolledAt));
+  },
+
+  async listOrderHistoryByUserId(userId: number) {
+    return await db
+      .select({
+        orderId: orders.id,
+        createdAt: orders.createdAt,
+        amount: orders.grandTotal,
+        status: orders.status,
+        courseId: courses.id,
+        courseTitle: courses.title,
+      })
+      .from(orders)
+      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .leftJoin(courses, eq(orderItems.courseId, courses.id))
+      .where(eq(orders.userId, userId))
+      .orderBy(desc(orders.createdAt), desc(orders.id));
+  },
+
+  async listCertificatesByUserId(userId: number) {
+    return await db
+      .select({
+        id: certificates.id,
+        certificateCode: certificates.certificateCode,
+        issuedAt: certificates.issuedAt,
+        courseId: courses.id,
+        courseTitle: courses.title,
+        cpeCredits: courses.cpeCredits,
+      })
+      .from(certificates)
+      .innerJoin(courses, eq(certificates.courseId, courses.id))
+      .where(eq(certificates.userId, userId))
+      .orderBy(desc(certificates.issuedAt));
+  },
+
+  async getTotalSpentByUserId(userId: number) {
+    const [result] = await db
+      .select({
+        totalSpent: sql<string>`coalesce(sum(${orders.grandTotal}), 0)`,
+      })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), eq(orders.status, 'PAID')));
+
+    return Number(result?.totalSpent ?? 0);
   },
 
   async findByEmail(email: string): Promise<User | undefined> {

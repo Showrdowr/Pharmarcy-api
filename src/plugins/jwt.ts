@@ -15,7 +15,7 @@ export async function registerJwt(app: FastifyInstance) {
     try {
       await request.jwtVerify();
     } catch (err) {
-      reply.status(401).send({ success: false, error: 'Unauthorized' });
+      reply.status(401).send({ success: false, statusCode: 401, code: 'UNAUTHORIZED', error: 'Unauthorized', message: 'Unauthorized' });
     }
   });
 
@@ -27,14 +27,26 @@ export async function registerJwt(app: FastifyInstance) {
         const user = request.user as { role?: string; isAdmin?: boolean };
 
         if (!user.isAdmin) {
-          return reply.status(403).send({ success: false, error: 'Forbidden: admin access required' });
+          return reply.status(403).send({
+            success: false,
+            statusCode: 403,
+            code: 'FORBIDDEN',
+            error: 'Forbidden: admin access required',
+            message: 'Forbidden: admin access required',
+          });
         }
 
         if (allowedRoles.length > 0 && !allowedRoles.includes(user.role || '')) {
-          return reply.status(403).send({ success: false, error: `Forbidden: requires role ${allowedRoles.join(' or ')}` });
+          return reply.status(403).send({
+            success: false,
+            statusCode: 403,
+            code: 'FORBIDDEN',
+            error: `Forbidden: requires role ${allowedRoles.join(' or ')}`,
+            message: `Forbidden: requires role ${allowedRoles.join(' or ')}`,
+          });
         }
       } catch (err) {
-        reply.status(401).send({ success: false, error: 'Unauthorized' });
+        reply.status(401).send({ success: false, statusCode: 401, code: 'UNAUTHORIZED', error: 'Unauthorized', message: 'Unauthorized' });
       }
     };
   });

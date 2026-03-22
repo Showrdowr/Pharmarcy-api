@@ -12,10 +12,14 @@ import {
   videoQuestions,
   exams,
   examQuestions,
+  userExamAttempts,
+  userExamAnswers,
   enrollments,
   certificates,
   userLessonProgress,
   userVideoAnswers,
+  orderItems,
+  cartItems,
 } from '../../db/schema/index.js';
 import { eq, and, desc, asc, count, inArray, sql, or, ilike, isNotNull } from 'drizzle-orm';
 import type { 
@@ -44,6 +48,8 @@ import type {
   CompleteVideoUploadInput,
 } from './courses.schema.js';
 
+const LEARNER_ACCESSIBLE_COURSE_STATUSES = ['PUBLISHED', 'ARCHIVED'] as const;
+type DbConnection = any;
 type CourseWriteTimestampValue = string | Date | null | undefined;
 type VideoProviderValue = 'YOUTUBE' | 'VIMEO' | 'CLOUDFLARE' | 'S3';
 type VideoStatusValue = 'PROCESSING' | 'READY' | 'FAILED';
@@ -59,6 +65,11 @@ type VideoUsageSummary = {
   previewCourseCount: number;
   lessonUsageCount: number;
   totalUsageCount: number;
+};
+type CourseDeletionBlockers = {
+  enrollmentsCount: number;
+  certificatesCount: number;
+  orderItemsCount: number;
 };
 type CreateCourseRepositoryInput = CreateCourseInput & {
   publishedAt?: CourseWriteTimestampValue;
@@ -461,6 +472,39 @@ export const coursesRepository = {
     return await this.attachCourseDetails(course);
   },
 
+  async getCourseForLearner(id: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const course = await conn.query.courses.findFirst({
+      where: and(eq(courses.id, id), inArray(courses.status, [...LEARNER_ACCESSIBLE_COURSE_STATUSES])),
+      with: {
+        category: true,
+        subcategory: true,
+        previewVideo: true,
+        lessons: {
+          orderBy: [asc(lessons.sequenceOrder)],
+          with: {
+            video: true,
+            videoQuestions: {
+              orderBy: [asc(videoQuestions.displayAtSeconds), asc(videoQuestions.sortOrder), asc(videoQuestions.id)],
+            },
+            documents: true,
+            lessonQuizzes: {
+              with: {
+                questions: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      return null;
+    }
+
+    return await this.attachCourseDetails(course, tx);
+  },
+
   async createCourse(data: CreateCourseRepositoryInput) {
     const [result] = await db.insert(courses).values({
       ...data,
@@ -488,9 +532,142 @@ export const coursesRepository = {
     return result;
   },
 
+  async getCourseDeletionBlockers(id: number): Promise<CourseDeletionBlockers> {
+    const [enrollmentSummary, certificateSummary, orderItemSummary] = await Promise.all([
+      db
+        .select({ count: count(enrollments.id) })
+        .from(enrollments)
+        .where(eq(enrollments.courseId, id)),
+      db
+        .select({ count: count(certificates.id) })
+        .from(certificates)
+        .where(eq(certificates.courseId, id)),
+      db
+        .select({ count: count(orderItems.id) })
+        .from(orderItems)
+        .where(eq(orderItems.courseId, id)),
+    ]);
+
+    return {
+      enrollmentsCount: Number(enrollmentSummary[0]?.count ?? 0),
+      certificatesCount: Number(certificateSummary[0]?.count ?? 0),
+      orderItemsCount: Number(orderItemSummary[0]?.count ?? 0),
+    };
+  },
+
   async deleteCourse(id: number) {
-    const [result] = await db.delete(courses).where(eq(courses.id, id)).returning();
-    return result;
+    return await db.transaction(async (tx) => {
+      const [courseRow] = await tx
+        .select({
+          previewVideoId: courses.previewVideoId,
+        })
+        .from(courses)
+        .where(eq(courses.id, id));
+
+      if (!courseRow) {
+        return null;
+      }
+
+      const lessonRows = await tx
+        .select({ id: lessons.id, videoId: lessons.videoId })
+        .from(lessons)
+        .where(eq(lessons.courseId, id));
+      const lessonIds = lessonRows.map((row) => row.id);
+      const candidateVideoIds = Array.from(
+        new Set(
+          [
+            courseRow.previewVideoId,
+            ...lessonRows.map((row) => row.videoId),
+          ].filter((videoId): videoId is number => Number.isInteger(videoId))
+        )
+      );
+
+      if (lessonIds.length > 0) {
+        const videoQuestionRows = await tx
+          .select({ id: videoQuestions.id })
+          .from(videoQuestions)
+          .where(inArray(videoQuestions.lessonId, lessonIds));
+        const videoQuestionIds = videoQuestionRows.map((row) => row.id);
+
+        if (videoQuestionIds.length > 0) {
+          await tx.delete(userVideoAnswers).where(inArray(userVideoAnswers.videoQuestionId, videoQuestionIds));
+          await tx.delete(videoQuestions).where(inArray(videoQuestions.id, videoQuestionIds));
+        }
+
+        await tx.delete(userLessonProgress).where(inArray(userLessonProgress.lessonId, lessonIds));
+        await tx.delete(lessons).where(inArray(lessons.id, lessonIds));
+      }
+
+      const examRows = await tx
+        .select({ id: exams.id })
+        .from(exams)
+        .where(eq(exams.courseId, id));
+      const examIds = examRows.map((row) => row.id);
+
+      if (examIds.length > 0) {
+        const [examQuestionRows, examAttemptRows] = await Promise.all([
+          tx
+            .select({ id: examQuestions.id })
+            .from(examQuestions)
+            .where(inArray(examQuestions.examId, examIds)),
+          tx
+            .select({ id: userExamAttempts.id })
+            .from(userExamAttempts)
+            .where(inArray(userExamAttempts.examId, examIds)),
+        ]);
+
+        const examQuestionIds = examQuestionRows.map((row) => row.id);
+        const examAttemptIds = examAttemptRows.map((row) => row.id);
+
+        if (examAttemptIds.length > 0) {
+          await tx.delete(userExamAnswers).where(inArray(userExamAnswers.attemptId, examAttemptIds));
+          await tx.delete(userExamAttempts).where(inArray(userExamAttempts.id, examAttemptIds));
+        }
+
+        if (examQuestionIds.length > 0) {
+          await tx.delete(userExamAnswers).where(inArray(userExamAnswers.examQuestionId, examQuestionIds));
+          await tx.delete(examQuestions).where(inArray(examQuestions.id, examQuestionIds));
+        }
+
+        await tx.delete(exams).where(inArray(exams.id, examIds));
+      }
+
+      await tx.delete(cartItems).where(eq(cartItems.courseId, id));
+
+      const [deletedCourse] = await tx.delete(courses).where(eq(courses.id, id)).returning();
+
+      let deletedVideos: typeof videos.$inferSelect[] = [];
+
+      if (candidateVideoIds.length > 0) {
+        const orphanVideos = await tx
+          .select()
+          .from(videos)
+          .where(and(
+            inArray(videos.id, candidateVideoIds),
+            sql`not exists (
+              select 1
+              from ${lessons}
+              where ${lessons.videoId} = ${videos.id}
+            )`,
+            sql`not exists (
+              select 1
+              from ${courses}
+              where ${courses.previewVideoId} = ${videos.id}
+            )`
+          ));
+
+        const orphanVideoIds = orphanVideos.map((video) => video.id);
+        if (orphanVideoIds.length > 0) {
+          await tx.delete(videos).where(inArray(videos.id, orphanVideoIds));
+          deletedVideos = orphanVideos;
+        }
+      }
+
+      return {
+        course: deletedCourse,
+        deletedVideos,
+      };
+    });
   },
 
   async replaceRelatedCourses(courseId: number, relatedCourseIds: number[]) {
@@ -626,12 +803,28 @@ export const coursesRepository = {
     }
 
     return await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        select ${lessons.id}
+        from ${lessons}
+        where ${lessons.id} = ${lessonId}
+        for update
+      `);
+
+      const [sortOrderRow] = await tx
+        .select({
+          maxSortOrder: sql<number>`coalesce(max(${videoQuestions.sortOrder}), -1)`,
+        })
+        .from(videoQuestions)
+        .where(eq(videoQuestions.lessonId, lessonId));
+
+      let nextSortOrder = Number(sortOrderRow?.maxSortOrder ?? -1) + 1;
+
       return await tx.insert(videoQuestions).values(
         data.map((question) => ({
           lessonId,
           questionText: question.questionText,
           displayAtSeconds: question.displayAtSeconds,
-          sortOrder: question.sortOrder ?? 0,
+          sortOrder: question.sortOrder ?? nextSortOrder++,
           questionType: question.questionType,
           options: question.options ?? null,
           correctAnswer: question.correctAnswer ?? null,
@@ -934,28 +1127,31 @@ export const coursesRepository = {
     };
   },
 
-  async listUserLessonProgress(userId: number, lessonIds: number[]) {
+  async listUserLessonProgress(userId: number, lessonIds: number[], tx?: DbConnection) {
     if (lessonIds.length === 0) {
       return [];
     }
 
-    return await db.query.userLessonProgress.findMany({
+    const conn = tx ?? db;
+    return await conn.query.userLessonProgress.findMany({
       where: and(eq(userLessonProgress.userId, userId), inArray(userLessonProgress.lessonId, lessonIds)),
     });
   },
 
-  async listUserVideoAnswers(userId: number, videoQuestionIds: number[]) {
+  async listUserVideoAnswers(userId: number, videoQuestionIds: number[], tx?: DbConnection) {
     if (videoQuestionIds.length === 0) {
       return [];
     }
 
-    return await db.query.userVideoAnswers.findMany({
+    const conn = tx ?? db;
+    return await conn.query.userVideoAnswers.findMany({
       where: and(eq(userVideoAnswers.userId, userId), inArray(userVideoAnswers.videoQuestionId, videoQuestionIds)),
     });
   },
 
-  async upsertLessonProgress(userId: number, lessonId: number, data: UpdateLessonProgressInput & { isCompleted: boolean }) {
-    const [progress] = await db
+  async upsertLessonProgress(userId: number, lessonId: number, data: UpdateLessonProgressInput & { isCompleted: boolean }, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [progress] = await conn
       .insert(userLessonProgress)
       .values({
         userId,
@@ -977,8 +1173,9 @@ export const coursesRepository = {
     return progress;
   },
 
-  async markLessonCompleted(userId: number, lessonId: number, lastWatchedSeconds: number) {
-    const [progress] = await db
+  async markLessonCompleted(userId: number, lessonId: number, lastWatchedSeconds: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [progress] = await conn
       .insert(userLessonProgress)
       .values({
         userId,
@@ -1000,8 +1197,9 @@ export const coursesRepository = {
     return progress;
   },
 
-  async upsertVideoQuestionAnswer(userId: number, videoQuestionId: number, data: CreateVideoQuestionAnswerInput) {
-    const [answer] = await db
+  async upsertVideoQuestionAnswer(userId: number, videoQuestionId: number, data: CreateVideoQuestionAnswerInput, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [answer] = await conn
       .insert(userVideoAnswers)
       .values({
         userId,
@@ -1033,17 +1231,30 @@ export const coursesRepository = {
     return video;
   },
 
-  async findEnrollment(userId: number, courseId: number) {
-    return await db.query.enrollments.findFirst({
+  async findEnrollment(userId: number, courseId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    return await conn.query.enrollments.findFirst({
       where: and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)),
     });
   },
 
-  async touchEnrollment(userId: number, courseId: number) {
-    const [enrollment] = await db
+  async lockEnrollment(userId: number, courseId: number, tx: DbConnection) {
+    await tx.execute(sql`
+      select ${enrollments.id}
+      from ${enrollments}
+      where ${enrollments.userId} = ${userId}
+        and ${enrollments.courseId} = ${courseId}
+      for update
+    `);
+  },
+
+  async touchEnrollment(userId: number, courseId: number, lessonId?: number | null, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [enrollment] = await conn
       .update(enrollments)
       .set({
         lastAccessedAt: new Date(),
+        ...(lessonId !== undefined ? { lastAccessedLessonId: lessonId } : {}),
       })
       .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)))
       .returning();
@@ -1051,13 +1262,26 @@ export const coursesRepository = {
     return enrollment;
   },
 
-  async updateEnrollmentProgress(userId: number, courseId: number, progressPercent: number, isCompleted: boolean) {
-    const [enrollment] = await db
+  async updateEnrollmentProgress(
+    userId: number,
+    courseId: number,
+    progressPercent: number,
+    isCompleted: boolean,
+    options?: {
+      watchPercent?: number;
+      lastAccessedLessonId?: number | null;
+    },
+    tx?: DbConnection,
+  ) {
+    const conn = tx ?? db;
+    const [enrollment] = await conn
       .update(enrollments)
       .set({
         progressPercent: progressPercent.toFixed(2),
+        ...(options?.watchPercent !== undefined ? { watchPercent: options.watchPercent.toFixed(2) } : {}),
         isCompleted,
         lastAccessedAt: new Date(),
+        ...(options?.lastAccessedLessonId !== undefined ? { lastAccessedLessonId: options.lastAccessedLessonId } : {}),
       })
       .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)))
       .returning();
@@ -1113,7 +1337,7 @@ export const coursesRepository = {
     const certificateMap = new Map(certificateRows.map((row) => [row.courseId, row]));
 
     return enrollmentRows
-      .filter((row) => Boolean(row.course))
+      .filter((row) => Boolean(row.course) && LEARNER_ACCESSIBLE_COURSE_STATUSES.includes(row.course.status as typeof LEARNER_ACCESSIBLE_COURSE_STATUSES[number]))
       .map((row) => ({
         ...row,
         course: row.course
@@ -1126,8 +1350,9 @@ export const coursesRepository = {
       }));
   },
 
-  async countEnrollments(courseId: number) {
-    const [result] = await db
+  async countEnrollments(courseId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [result] = await conn
       .select({ count: count(enrollments.id) })
       .from(enrollments)
       .where(eq(enrollments.courseId, courseId));
@@ -1135,14 +1360,15 @@ export const coursesRepository = {
     return result?.count ?? 0;
   },
 
-  async attachCourseSummaries<T extends Array<any>>(courseRows: T): Promise<T> {
+  async attachCourseSummaries<T extends Array<any>>(courseRows: T, tx?: DbConnection): Promise<T> {
     if (courseRows.length === 0) {
       return courseRows;
     }
 
+    const conn = tx ?? db;
     const courseIds = courseRows.map((course) => course.id);
 
-    const enrollmentSummary = await db
+    const enrollmentSummary = await conn
       .select({
         courseId: enrollments.courseId,
         count: count(enrollments.id),
@@ -1151,7 +1377,7 @@ export const coursesRepository = {
       .where(inArray(enrollments.courseId, courseIds))
       .groupBy(enrollments.courseId);
 
-    const lessonSummary = await db
+    const lessonSummary = await conn
       .select({
         courseId: lessons.courseId,
         count: count(lessons.id),
@@ -1160,8 +1386,8 @@ export const coursesRepository = {
       .where(inArray(lessons.courseId, courseIds))
       .groupBy(lessons.courseId);
 
-    const enrollmentMap = new Map(enrollmentSummary.map((row) => [row.courseId, row.count]));
-    const lessonMap = new Map(lessonSummary.map((row) => [row.courseId, row.count]));
+    const enrollmentMap = new Map(enrollmentSummary.map((row: any) => [row.courseId, row.count]));
+    const lessonMap = new Map(lessonSummary.map((row: any) => [row.courseId, row.count]));
 
     return courseRows.map((course) => ({
       ...course,
@@ -1171,10 +1397,11 @@ export const coursesRepository = {
     })) as T;
   },
 
-  async attachCourseDetails<T extends Record<string, any>>(course: T): Promise<T> {
-    const enrolledCount = await this.countEnrollments(course.id);
+  async attachCourseDetails<T extends Record<string, any>>(course: T, tx?: DbConnection): Promise<T> {
+    const conn = tx ?? db;
+    const enrolledCount = await this.countEnrollments(course.id, tx);
 
-    const relatedLinks = await db.query.courseRelatedCourses.findMany({
+    const relatedLinks = await conn.query.courseRelatedCourses.findMany({
       where: eq(courseRelatedCourses.courseId, course.id),
       orderBy: [asc(courseRelatedCourses.sortOrder)],
       with: {
@@ -1187,11 +1414,11 @@ export const coursesRepository = {
       },
     });
 
-    const relatedCourseIds = relatedLinks.map((link) => link.relatedCourseId);
+    const relatedCourseIds = relatedLinks.map((link: any) => link.relatedCourseId);
     const relatedEnrollmentMap = new Map<number, number>();
 
     if (relatedCourseIds.length > 0) {
-      const relatedEnrollments = await db
+      const relatedEnrollments = await conn
         .select({
           courseId: enrollments.courseId,
           count: count(enrollments.id),
@@ -1200,15 +1427,15 @@ export const coursesRepository = {
         .where(inArray(enrollments.courseId, relatedCourseIds))
         .groupBy(enrollments.courseId);
 
-      relatedEnrollments.forEach((item) => {
+      relatedEnrollments.forEach((item: any) => {
         relatedEnrollmentMap.set(item.courseId, item.count);
       });
     }
 
     const relatedCourses = relatedLinks
-      .map((link) => link.relatedCourse)
+      .map((link: any) => link.relatedCourse)
       .filter(Boolean)
-      .map((relatedCourse) => ({
+      .map((relatedCourse: any) => ({
         ...relatedCourse,
         enrolledCount: relatedEnrollmentMap.get(relatedCourse.id) ?? 0,
         enrollmentsCount: relatedEnrollmentMap.get(relatedCourse.id) ?? 0,
@@ -1221,7 +1448,7 @@ export const coursesRepository = {
       enrolledCount,
       enrollmentsCount: enrolledCount,
       relatedCourses,
-      relatedCourseIds: relatedCourses.map((relatedCourse) => relatedCourse.id),
+      relatedCourseIds: relatedCourses.map((relatedCourse: any) => relatedCourse.id),
       lessonsCount: Array.isArray(course.lessons) ? course.lessons.length : 0,
       lessons: Array.isArray(course.lessons)
         ? course.lessons.map((lesson: any) => ({

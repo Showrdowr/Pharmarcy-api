@@ -27,12 +27,12 @@ export const adminManageController = {
       .limit(1);
 
     if (admin.length === 0) {
-      return reply.status(401).send({ success: false, error: 'ไม่พบข้อมูลผู้ดูแลระบบ' });
+      return reply.status(401).send({ success: false, code: 'UNAUTHORIZED', error: 'ไม่พบข้อมูลผู้ดูแลระบบ', message: 'ไม่พบข้อมูลผู้ดูแลระบบ' });
     }
 
     const isPasswordValid = await bcrypt.compare(confirmPassword, admin[0].passwordHash);
     if (!isPasswordValid) {
-      return reply.status(403).send({ success: false, error: 'รหัสผ่านยืนยันไม่ถูกต้อง' });
+      return reply.status(403).send({ success: false, code: 'INVALID_CONFIRM_PASSWORD', error: 'รหัสผ่านยืนยันไม่ถูกต้อง', message: 'รหัสผ่านยืนยันไม่ถูกต้อง' });
     }
 
     // 2. Check duplicate email
@@ -43,7 +43,7 @@ export const adminManageController = {
       .limit(1);
 
     if (existingEmail.length > 0) {
-      return reply.status(409).send({ success: false, error: 'อีเมลนี้มีอยู่ในระบบแล้ว' });
+      return reply.status(409).send({ success: false, code: 'ADMIN_EMAIL_EXISTS', error: 'อีเมลนี้มีอยู่ในระบบแล้ว', message: 'อีเมลนี้มีอยู่ในระบบแล้ว' });
     }
 
     // 3. Generate username based on role
@@ -209,7 +209,7 @@ export const adminManageController = {
     const currentUser = request.user as { id: string };
 
     if (id === currentUser.id) {
-      return reply.status(400).send({ success: false, error: 'ไม่สามารถลบ account ของตัวเองได้' });
+      return reply.status(400).send({ success: false, code: 'ADMIN_SELF_DELETE_FORBIDDEN', error: 'ไม่สามารถลบ account ของตัวเองได้', message: 'ไม่สามารถลบ account ของตัวเองได้' });
     }
 
     // 1. Verify admin's password
@@ -220,12 +220,12 @@ export const adminManageController = {
       .limit(1);
 
     if (admin.length === 0) {
-      return reply.status(401).send({ success: false, error: 'ไม่พบข้อมูลผู้ดูแลระบบ' });
+      return reply.status(401).send({ success: false, code: 'UNAUTHORIZED', error: 'ไม่พบข้อมูลผู้ดูแลระบบ', message: 'ไม่พบข้อมูลผู้ดูแลระบบ' });
     }
 
     const isPasswordValid = await bcrypt.compare(confirmPassword, admin[0].passwordHash);
     if (!isPasswordValid) {
-      return reply.status(403).send({ success: false, error: 'รหัสผ่านยืนยันไม่ถูกต้อง' });
+      return reply.status(403).send({ success: false, code: 'INVALID_CONFIRM_PASSWORD', error: 'รหัสผ่านยืนยันไม่ถูกต้อง', message: 'รหัสผ่านยืนยันไม่ถูกต้อง' });
     }
 
     // 2. Check if target user exists and get their info for audit log
@@ -242,7 +242,7 @@ export const adminManageController = {
       .limit(1);
 
     if (existing.length === 0) {
-      return reply.status(404).send({ success: false, error: 'ไม่พบผู้ใช้นี้' });
+      return reply.status(404).send({ success: false, code: 'ADMIN_USER_NOT_FOUND', error: 'ไม่พบผู้ใช้นี้', message: 'ไม่พบผู้ใช้นี้' });
     }
 
     const deletedUser = existing[0];

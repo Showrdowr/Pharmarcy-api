@@ -13,7 +13,21 @@ export const userController = {
     reply: FastifyReply
   ) {
     const user = await userService.getUserById(Number(request.params.id));
-    return reply.send(user);
+    return reply.send({
+      success: true,
+      data: user,
+    });
+  },
+
+  async getOverview(
+    request: FastifyRequest<{ Params: { id: number } }>,
+    reply: FastifyReply
+  ) {
+    const overview = await userService.getUserOverview(Number(request.params.id));
+    return reply.send({
+      success: true,
+      data: overview,
+    });
   },
 
   async create(
@@ -21,7 +35,10 @@ export const userController = {
     reply: FastifyReply
   ) {
     const user = await userService.createUser(request.body);
-    return reply.status(201).send(user);
+    return reply.status(201).send({
+      success: true,
+      data: user,
+    });
   },
 
   async update(
@@ -29,7 +46,10 @@ export const userController = {
     reply: FastifyReply
   ) {
     const user = await userService.updateUser(Number(request.params.id), request.body);
-    return reply.send(user);
+    return reply.send({
+      success: true,
+      data: user,
+    });
   },
 
   async delete(
@@ -37,6 +57,8 @@ export const userController = {
     reply: FastifyReply
   ) {
     await userService.deleteUser(Number(request.params.id));
-    return reply.status(204).send();
+    return reply.send({
+      success: true,
+    });
   },
 };

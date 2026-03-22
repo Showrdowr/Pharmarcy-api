@@ -1,5 +1,7 @@
 import { coursesRepository } from './courses.repository.js';
 import { auditLogsService } from '../audit-logs/audit-logs.service.js';
+import { db } from '../../db/index.js';
+import { env } from '../../config/env.js';
 import {
   normalizeCourseThumbnail,
   normalizeThumbnailForStorage,
@@ -51,6 +53,25 @@ import type {
 } from './courses.schema.js';
 
 type LearningSnapshot = Awaited<ReturnType<typeof buildLearningSnapshot>>;
+
+type ProgressRow = {
+  id: number;
+  userId: number;
+  lessonId: number;
+  lastWatchedSeconds: number | null;
+  isCompleted: boolean | null;
+  updatedAt: Date | string | null;
+};
+
+type AnswerRow = {
+  id: number;
+  userId: number;
+  videoQuestionId: number;
+  answerGiven: string | null;
+  isCorrect: boolean | null;
+  createdAt: Date | string | null;
+  updatedAt: Date | string | null;
+};
 
 type CourseStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 type VideoListFilters = {
@@ -318,6 +339,44 @@ function calculateProgressPercent(completedLessons: number, totalLessons: number
   return Number(((completedLessons / totalLessons) * 100).toFixed(2));
 }
 
+function calculateWatchPercent(watchedSeconds: number, totalDurationSeconds: number) {
+  if (totalDurationSeconds <= 0) {
+    return 0;
+  }
+
+  return Number((((Math.min(Math.max(watchedSeconds, 0), totalDurationSeconds)) / totalDurationSeconds) * 100).toFixed(2));
+}
+
+function calculateCourseWatchMetrics(
+  lessons: any[],
+  progressMap: Map<number, { lastWatchedSeconds?: number | null; isCompleted?: boolean | null }>
+) {
+  let totalDurationSeconds = 0;
+  let watchedSeconds = 0;
+
+  for (const lesson of lessons) {
+    const lessonId = Number(lesson.id);
+    const duration = Math.max(0, Number(lesson.video?.duration ?? 0));
+    if (duration <= 0) {
+      continue;
+    }
+
+    totalDurationSeconds += duration;
+    const progress = progressMap.get(lessonId);
+    const effectiveWatchedSeconds = progress?.isCompleted
+      ? duration
+      : Number(progress?.lastWatchedSeconds ?? 0);
+
+    watchedSeconds += Math.min(duration, Math.max(0, effectiveWatchedSeconds));
+  }
+
+  return {
+    watchedSeconds,
+    totalDurationSeconds,
+    watchPercent: calculateWatchPercent(watchedSeconds, totalDurationSeconds),
+  };
+}
+
 function getLessonWatchThreshold(duration?: number | null) {
   if (!duration || duration <= 0) {
     return 0;
@@ -383,17 +442,24 @@ async function withRelatedCourses(courseId: number, relatedCourseIds?: number[])
   await coursesRepository.replaceRelatedCourses(courseId, relatedCourseIds);
 }
 
-async function getPublishedCourseForLearnerOrThrow(courseId: number) {
-  const course = await coursesRepository.getPublishedCourseById(courseId);
+async function getLearnerAccessibleCourseOrThrow(courseId: number, userId: number, tx?: any) {
+  const course = await coursesRepository.getCourseForLearner(courseId, tx);
   if (!course) {
     throw buildAppError('Course not found', 404);
+  }
+
+  if (course.status === 'ARCHIVED') {
+    const enrollment = await coursesRepository.findEnrollment(userId, courseId, tx);
+    if (!enrollment) {
+      throw buildAppError('Course not found', 404);
+    }
   }
 
   return normalizeCourseForAdmin(course);
 }
 
-async function getEnrollmentOrThrow(userId: number, courseId: number) {
-  const enrollment = await coursesRepository.findEnrollment(userId, courseId);
+async function getEnrollmentOrThrow(userId: number, courseId: number, tx?: any) {
+  const enrollment = await coursesRepository.findEnrollment(userId, courseId, tx);
   if (!enrollment) {
     throw buildAppError('กรุณาสมัครเรียนก่อนเข้าดูเนื้อหา', 403, 'COURSE_NOT_ENROLLED');
   }
@@ -401,9 +467,9 @@ async function getEnrollmentOrThrow(userId: number, courseId: number) {
   return enrollment;
 }
 
-async function buildLearningSnapshot(courseId: number, userId: number) {
-  const course = await getPublishedCourseForLearnerOrThrow(courseId);
-  const enrollment = await getEnrollmentOrThrow(userId, courseId);
+async function buildLearningSnapshot(courseId: number, userId: number, tx?: any) {
+  const course = await getLearnerAccessibleCourseOrThrow(courseId, userId, tx);
+  const enrollment = await getEnrollmentOrThrow(userId, courseId, tx);
 
   const lessons = Array.isArray(course.lessons) ? course.lessons.map((lesson: any) => normalizeLessonForResponse(lesson)) : [];
   const lessonIds = lessons.map((lesson: any) => Number(lesson.id));
@@ -412,13 +478,15 @@ async function buildLearningSnapshot(courseId: number, userId: number) {
   );
 
   const [progressRows, answerRows] = await Promise.all([
-    coursesRepository.listUserLessonProgress(userId, lessonIds),
-    coursesRepository.listUserVideoAnswers(userId, questionIds),
+    coursesRepository.listUserLessonProgress(userId, lessonIds, tx),
+    coursesRepository.listUserVideoAnswers(userId, questionIds, tx),
   ]);
 
-  const progressMap = new Map(progressRows.map((row) => [Number(row.lessonId), row]));
-  const answerMap = new Map(
-    answerRows
+  const progressMap = new Map<number, ProgressRow>(
+    (progressRows as ProgressRow[]).map((row) => [Number(row.lessonId), row])
+  );
+  const answerMap = new Map<number, AnswerRow>(
+    (answerRows as AnswerRow[])
       .filter((row) => row.videoQuestionId !== null)
       .map((row) => [Number(row.videoQuestionId), row])
   );
@@ -427,11 +495,19 @@ async function buildLearningSnapshot(courseId: number, userId: number) {
     .filter((lesson: any) => Boolean(progressMap.get(Number(lesson.id))?.isCompleted))
     .map((lesson: any) => Number(lesson.id));
 
-  const lastAccessedProgress = [...progressRows].sort((left, right) => {
+  const lastAccessedProgress = ([...progressRows] as ProgressRow[]).sort((left, right) => {
     const leftTime = new Date(left.updatedAt || 0).getTime();
     const rightTime = new Date(right.updatedAt || 0).getTime();
     return rightTime - leftTime;
   })[0];
+
+  const explicitLastAccessedLessonId = Number(enrollment.lastAccessedLessonId ?? 0);
+  const derivedLastAccessedLessonId = lastAccessedProgress ? Number(lastAccessedProgress.lessonId) : null;
+  const resolvedLastAccessedLessonId = Number.isInteger(explicitLastAccessedLessonId) && explicitLastAccessedLessonId > 0
+    ? explicitLastAccessedLessonId
+    : derivedLastAccessedLessonId;
+
+  const watchMetrics = calculateCourseWatchMetrics(lessons, progressMap);
 
   return {
     course,
@@ -442,7 +518,8 @@ async function buildLearningSnapshot(courseId: number, userId: number) {
     answerRows,
     answerMap,
     completedLessonIds,
-    lastAccessedLessonId: lastAccessedProgress ? Number(lastAccessedProgress.lessonId) : null,
+    lastAccessedLessonId: resolvedLastAccessedLessonId,
+    watchMetrics,
   };
 }
 
@@ -464,20 +541,28 @@ function assertLessonAccessibleForLearner(snapshot: LearningSnapshot, lessonId: 
   );
 }
 
+function buildEnrollmentSummary(snapshot: LearningSnapshot) {
+  const totalLessons = snapshot.lessons.length;
+  const completionPercent = calculateProgressPercent(snapshot.completedLessonIds.length, totalLessons);
+
+  return {
+    totalLessons,
+    completionPercent,
+    watchPercent: snapshot.watchMetrics.watchPercent,
+    isCompleted: totalLessons > 0 && snapshot.completedLessonIds.length >= totalLessons,
+  };
+}
+
 function normalizeAndValidateCreateVideoQuestion(
   lesson: any,
   data: CreateVideoQuestionInput,
-  fallbackSortOrder?: number,
 ) {
   const duration = Number(lesson.video?.duration ?? 0);
   if (duration > 0 && data.displayAtSeconds > duration) {
     throw buildAppError('เวลาที่แสดงคำถามต้องไม่เกินความยาววิดีโอ', 400);
   }
 
-  return normalizeInteractiveQuestionPayload({
-    ...data,
-    sortOrder: data.sortOrder ?? fallbackSortOrder,
-  }) as CreateVideoQuestionInput;
+  return normalizeInteractiveQuestionPayload(data) as CreateVideoQuestionInput;
 }
 
 export const coursesService = {
@@ -617,7 +702,8 @@ export const coursesService = {
 
     return enrolledCourses.map((enrollment: any) => {
       const course = normalizeCourseThumbnail(enrollment.course || {});
-      const progressPercent = Number(enrollment.progressPercent ?? 0);
+      const completionPercent = Number(enrollment.progressPercent ?? 0);
+      const watchPercent = Number(enrollment.watchPercent ?? 0);
       const isCompleted = Boolean(enrollment.isCompleted);
       const completedAt = isCompleted
         ? enrollment.certificate?.issuedAt ?? enrollment.lastAccessedAt ?? enrollment.enrolledAt
@@ -633,11 +719,15 @@ export const coursesService = {
         instructor: course.authorName ?? null,
         cpeCredits: Number(course.cpeCredits ?? 0),
         cpe: Number(course.cpeCredits ?? 0),
-        progressPercent,
-        progress: progressPercent,
+        progressPercent: completionPercent,
+        progress: completionPercent,
+        completionPercent,
+        watchPercent,
         status: isCompleted ? 'completed' : 'in_progress',
+        courseStatus: String(course.status || 'PUBLISHED').toUpperCase(),
         enrolledAt: enrollment.enrolledAt,
         lastAccessedAt: enrollment.lastAccessedAt ?? null,
+        lastAccessedLessonId: enrollment.lastAccessedLessonId ?? null,
         completedAt,
         certificateUrl: null,
         certificateCode: enrollment.certificate?.certificateCode ?? null,
@@ -729,7 +819,7 @@ export const coursesService = {
       };
     });
 
-    const progressPercent = calculateProgressPercent(snapshot.completedLessonIds.length, lessons.length);
+    const completionPercent = calculateProgressPercent(snapshot.completedLessonIds.length, lessons.length);
     const currentLessonId = lessons.find((lesson: { status: string; id: number }) => (
       lesson.id === snapshot.lastAccessedLessonId && lesson.status !== 'locked'
     ))?.id
@@ -746,7 +836,9 @@ export const coursesService = {
       cpeCredits: Number(snapshot.course.cpeCredits ?? 0),
       enrolledAt: snapshot.enrollment.enrolledAt,
       lastAccessedAt: snapshot.enrollment.lastAccessedAt ?? snapshot.enrollment.enrolledAt,
-      progressPercent,
+      watchPercent: snapshot.watchMetrics.watchPercent,
+      completionPercent,
+      progressPercent: completionPercent,
       completedLessons: snapshot.completedLessonIds,
       lastAccessedLessonId: snapshot.lastAccessedLessonId,
       currentLessonId,
@@ -756,13 +848,15 @@ export const coursesService = {
 
   async getCourseProgress(id: number, userId: number) {
     const snapshot = await buildLearningSnapshot(id, userId);
-    const progressPercent = calculateProgressPercent(snapshot.completedLessonIds.length, snapshot.lessons.length);
+    const completionPercent = calculateProgressPercent(snapshot.completedLessonIds.length, snapshot.lessons.length);
 
     return {
       courseId: Number(snapshot.course.id),
       completedLessons: snapshot.completedLessonIds,
       lastAccessedLessonId: snapshot.lastAccessedLessonId ?? undefined,
-      progressPercent,
+      watchPercent: snapshot.watchMetrics.watchPercent,
+      completionPercent,
+      progressPercent: completionPercent,
       startedAt: snapshot.enrollment.enrolledAt,
       lastAccessedAt: snapshot.enrollment.lastAccessedAt ?? snapshot.enrollment.enrolledAt,
     };
@@ -834,6 +928,11 @@ export const coursesService = {
     await withRelatedCourses(id, relatedCourseIds);
 
     const updatedCourse = await coursesRepository.getCourseById(id);
+    const previewVideoChanged = typeof payload.previewVideoId !== 'undefined' && payload.previewVideoId !== existingCourse.previewVideoId;
+    if (previewVideoChanged) {
+      await this.cleanupOrphanedVideo(existingCourse.previewVideoId);
+    }
+
     if (adminId && course) {
       void auditLogsService.recordAction({
         adminId,
@@ -849,7 +948,40 @@ export const coursesService = {
 
   async deleteCourse(id: number, adminId?: string, ipAddress?: string) {
     const oldCourse = await coursesRepository.getCourseById(id);
-    const result = await coursesRepository.deleteCourse(id);
+    if (!oldCourse) {
+      return null;
+    }
+
+    const deletionBlockers = await coursesRepository.getCourseDeletionBlockers(id);
+    if (
+      deletionBlockers.enrollmentsCount > 0
+      || deletionBlockers.certificatesCount > 0
+      || deletionBlockers.orderItemsCount > 0
+    ) {
+      throw buildAppError(
+        'ไม่สามารถลบคอร์สที่มีประวัติการสมัครเรียน ใบประกาศนียบัตร หรือคำสั่งซื้อได้ กรุณาเปลี่ยนสถานะเป็น ARCHIVED แทน',
+        409,
+        'COURSE_DELETE_CONFLICT'
+      );
+    }
+
+    const deletionResult = await coursesRepository.deleteCourse(id);
+    const result = deletionResult?.course ?? null;
+
+    if (deletionResult?.deletedVideos?.length) {
+      void Promise.allSettled(
+        deletionResult.deletedVideos
+          .filter((video) => video.provider === 'VIMEO')
+          .map(async (video) => {
+            try {
+              await vimeoService.deleteVideo(video.resourceId);
+            } catch (error) {
+              console.error(`Failed to delete orphaned Vimeo video ${video.id} after deleting course ${id}:`, error);
+            }
+          })
+      );
+    }
+
     if (adminId && result) {
       void auditLogsService.recordAction({
         adminId,
@@ -860,6 +992,35 @@ export const coursesService = {
       });
     }
     return result;
+  },
+
+  async cleanupOrphanedVideo(videoId?: number | null) {
+    if (!Number.isInteger(videoId)) {
+      return null;
+    }
+
+    const normalizedVideoId = Number(videoId);
+    const usageCount = await coursesRepository.countVideoUsage(normalizedVideoId);
+    if (usageCount > 0) {
+      return null;
+    }
+
+    const video = await coursesRepository.getVideoById(normalizedVideoId);
+    if (!video) {
+      return null;
+    }
+
+    const deletedVideo = await coursesRepository.deleteVideo(video.id);
+
+    if (video.provider === 'VIMEO') {
+      try {
+        await vimeoService.deleteVideo(video.resourceId);
+      } catch (error) {
+        console.error(`Failed to delete orphaned Vimeo video ${video.id}:`, error);
+      }
+    }
+
+    return deletedVideo;
   },
 
   async listLessons(courseId: number) {
@@ -884,6 +1045,11 @@ export const coursesService = {
   },
 
   async updateLesson(id: number, data: UpdateLessonInput) {
+    const existingLesson = await coursesRepository.getLessonById(id);
+    if (!existingLesson) {
+      return null;
+    }
+
     if (data.videoId) {
       const video = await coursesRepository.getVideoById(data.videoId);
       if (!video) {
@@ -896,12 +1062,23 @@ export const coursesService = {
       return null;
     }
 
+    if (data.videoId && data.videoId !== existingLesson.videoId) {
+      await this.cleanupOrphanedVideo(existingLesson.videoId);
+    }
+
     const updatedLesson = await coursesRepository.getLessonById(id);
     return updatedLesson ? normalizeLessonForResponse(updatedLesson) : lesson;
   },
 
   async deleteLesson(id: number) {
-    return await coursesRepository.deleteLesson(id);
+    const lesson = await coursesRepository.getLessonById(id);
+    if (!lesson) {
+      return null;
+    }
+
+    const deletedLesson = await coursesRepository.deleteLesson(id);
+    await this.cleanupOrphanedVideo(lesson.videoId);
+    return deletedLesson;
   },
 
   async addLessonDocument(lessonId: number, data: CreateLessonDocumentInput) {
@@ -938,20 +1115,7 @@ export const coursesService = {
       throw buildAppError('กรุณาระบุคำถามอย่างน้อย 1 ข้อ', 400);
     }
 
-    let nextSortOrder = await coursesRepository.getNextVideoQuestionSortOrder(lessonId);
-    const payload = questions.map((question) => {
-      const normalizedQuestion = normalizeAndValidateCreateVideoQuestion(
-        lesson,
-        question,
-        question.sortOrder ?? nextSortOrder,
-      );
-
-      if (question.sortOrder === undefined) {
-        nextSortOrder += 1;
-      }
-
-      return normalizedQuestion;
-    });
+    const payload = questions.map((question) => normalizeAndValidateCreateVideoQuestion(lesson, question));
 
     return await coursesRepository.createVideoQuestionsBulk(lessonId, payload);
   },
@@ -994,12 +1158,11 @@ export const coursesService = {
     }
 
     const courseId = Number(question.lesson?.course?.id);
-    if (!courseId || question.lesson?.course?.status !== 'PUBLISHED') {
+    const lessonId = Number(question.lesson?.id);
+    const courseStatus = String(question.lesson?.course?.status || '').toUpperCase();
+    if (!courseId || !lessonId || !['PUBLISHED', 'ARCHIVED'].includes(courseStatus)) {
       throw buildAppError('Course not found', 404);
     }
-
-    const snapshot = await buildLearningSnapshot(courseId, userId);
-    assertLessonAccessibleForLearner(snapshot, Number(question.lesson?.id));
 
     const trimmedAnswer = data.answerGiven.trim();
     let canonicalAnswerGiven = trimmedAnswer;
@@ -1017,18 +1180,25 @@ export const coursesService = {
       canonicalAnswerGiven = resolvedAnswer;
     }
 
-    const answer = await coursesRepository.upsertVideoQuestionAnswer(userId, id, {
-      answerGiven: canonicalAnswerGiven,
-    });
-    await coursesRepository.touchEnrollment(userId, courseId);
+    return await db.transaction(async (tx) => {
+      await coursesRepository.lockEnrollment(userId, courseId, tx);
 
-    return {
-      id: answer.id,
-      videoQuestionId: Number(answer.videoQuestionId),
-      answerGiven: answer.answerGiven,
-      answered: true,
-      updatedAt: answer.updatedAt ?? answer.createdAt,
-    };
+      const snapshot = await buildLearningSnapshot(courseId, userId, tx);
+      assertLessonAccessibleForLearner(snapshot, lessonId);
+
+      const answer = await coursesRepository.upsertVideoQuestionAnswer(userId, id, {
+        answerGiven: canonicalAnswerGiven,
+      }, tx);
+      await coursesRepository.touchEnrollment(userId, courseId, lessonId, tx);
+
+      return {
+        id: answer.id,
+        videoQuestionId: Number(answer.videoQuestionId),
+        answerGiven: answer.answerGiven,
+        answered: true,
+        updatedAt: answer.updatedAt ?? answer.createdAt,
+      };
+    });
   },
 
   async updateLessonProgress(id: number, userId: number, data: UpdateLessonProgressInput) {
@@ -1038,82 +1208,122 @@ export const coursesService = {
     }
 
     const courseId = Number(lesson.courseId);
-    const snapshot = await buildLearningSnapshot(courseId, userId);
-    const { lesson: learningLesson } = assertLessonAccessibleForLearner(snapshot, id);
+    return await db.transaction(async (tx) => {
+      await coursesRepository.lockEnrollment(userId, courseId, tx);
 
-    const currentProgress = snapshot.progressMap.get(id);
-    const duration = Number(learningLesson.video?.duration ?? lesson.video?.duration ?? 0);
-    const contiguousIncomingSeconds = assertAllowedWatchedProgressAdvance(
-      Number(currentProgress?.lastWatchedSeconds ?? 0),
-      data.lastWatchedSeconds,
-      duration,
-      buildAppError,
-    );
-    const nextWatchedSeconds = calculateMonotonicWatchedSeconds(
-      Number(currentProgress?.lastWatchedSeconds ?? 0),
-      contiguousIncomingSeconds,
-      duration,
-    );
+      const snapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const { lesson: learningLesson } = assertLessonAccessibleForLearner(snapshot, id);
 
-    const progress = await coursesRepository.upsertLessonProgress(userId, id, {
-      lastWatchedSeconds: nextWatchedSeconds,
-      isCompleted: Boolean(currentProgress?.isCompleted),
+      const currentProgress = snapshot.progressMap.get(id);
+      const duration = Number(learningLesson.video?.duration ?? lesson.video?.duration ?? 0);
+      const contiguousIncomingSeconds = assertAllowedWatchedProgressAdvance(
+        Number(currentProgress?.lastWatchedSeconds ?? 0),
+        data.lastWatchedSeconds,
+        duration,
+        buildAppError,
+        env.LEARNING_ALLOWED_PROGRESS_ADVANCE_SECONDS,
+      );
+      const nextWatchedSeconds = calculateMonotonicWatchedSeconds(
+        Number(currentProgress?.lastWatchedSeconds ?? 0),
+        contiguousIncomingSeconds,
+        duration,
+      );
+
+      const progress = await coursesRepository.upsertLessonProgress(userId, id, {
+        lastWatchedSeconds: nextWatchedSeconds,
+        isCompleted: Boolean(currentProgress?.isCompleted),
+      }, tx);
+
+      const updatedSnapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const summary = buildEnrollmentSummary(updatedSnapshot);
+      await coursesRepository.updateEnrollmentProgress(
+        userId,
+        courseId,
+        summary.completionPercent,
+        summary.isCompleted,
+        {
+          watchPercent: summary.watchPercent,
+          lastAccessedLessonId: id,
+        },
+        tx,
+      );
+
+      return progress;
     });
-
-    const totalLessons = snapshot.lessons.length;
-    const progressRows = await coursesRepository.listUserLessonProgress(
-      userId,
-      snapshot.lessons.map((lessonItem: any) => Number(lessonItem.id))
-    );
-    const completedCount = progressRows.filter((row) => row.isCompleted).length;
-    await coursesRepository.updateEnrollmentProgress(
-      userId,
-      courseId,
-      calculateProgressPercent(completedCount, totalLessons),
-      totalLessons > 0 && completedCount >= totalLessons
-    );
-
-    return progress;
   },
 
   async completeLesson(courseId: number, lessonId: number, userId: number) {
-    const snapshot = await buildLearningSnapshot(courseId, userId);
-    const { lesson } = assertLessonAccessibleForLearner(snapshot, lessonId);
-    const currentProgress = snapshot.progressMap.get(lessonId);
-    const watchedSeconds = Number(currentProgress?.lastWatchedSeconds ?? 0);
-    const watchThreshold = getLessonWatchThreshold(Number(lesson.video?.duration ?? 0));
-    if (watchThreshold > 0 && watchedSeconds < watchThreshold) {
-      throw buildAppError('ต้องดูวิดีโอให้จบก่อนจบบทเรียน', 409, 'LESSON_VIDEO_INCOMPLETE');
-    }
+    return await db.transaction(async (tx) => {
+      await coursesRepository.lockEnrollment(userId, courseId, tx);
 
-    const unansweredInteractive = sortInteractiveQuestions(Array.isArray(lesson.videoQuestions) ? lesson.videoQuestions : [])
-      .find((question: any) => {
-        const answer = snapshot.answerMap.get(Number(question.id));
-        return !isInteractiveQuestionAnswered(question, answer);
-      });
+      const snapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const { lesson } = assertLessonAccessibleForLearner(snapshot, lessonId);
+      const currentProgress = snapshot.progressMap.get(lessonId);
 
-    if (unansweredInteractive) {
-      throw buildAppError('กรุณาตอบคำถาม interactive ให้ครบก่อนจบบทเรียน', 409, 'INTERACTIVE_INCOMPLETE');
-    }
+      if (currentProgress?.isCompleted) {
+        const summary = buildEnrollmentSummary(snapshot);
+        await coursesRepository.updateEnrollmentProgress(
+          userId,
+          courseId,
+          summary.completionPercent,
+          summary.isCompleted,
+          {
+            watchPercent: summary.watchPercent,
+            lastAccessedLessonId: lessonId,
+          },
+          tx,
+        );
 
-    const effectiveWatchedSeconds = Math.max(watchedSeconds, Number(lesson.video?.duration ?? watchedSeconds));
-    const progress = await coursesRepository.markLessonCompleted(userId, lessonId, effectiveWatchedSeconds);
+        return {
+          lessonId,
+          isCompleted: true,
+          completionPercent: summary.completionPercent,
+          progressPercent: summary.completionPercent,
+          updatedAt: currentProgress.updatedAt,
+        };
+      }
 
-    const completedCount = new Set([...snapshot.completedLessonIds, lessonId]).size;
-    const totalLessons = snapshot.lessons.length;
-    await coursesRepository.updateEnrollmentProgress(
-      userId,
-      courseId,
-      calculateProgressPercent(completedCount, totalLessons),
-      totalLessons > 0 && completedCount >= totalLessons
-    );
+      const watchedSeconds = Number(currentProgress?.lastWatchedSeconds ?? 0);
+      const watchThreshold = getLessonWatchThreshold(Number(lesson.video?.duration ?? 0));
+      if (watchThreshold > 0 && watchedSeconds < watchThreshold) {
+        throw buildAppError('ต้องดูวิดีโอให้จบก่อนจบบทเรียน', 409, 'LESSON_VIDEO_INCOMPLETE');
+      }
 
-    return {
-      lessonId,
-      isCompleted: true,
-      progressPercent: calculateProgressPercent(completedCount, totalLessons),
-      updatedAt: progress.updatedAt,
-    };
+      const unansweredInteractive = sortInteractiveQuestions(Array.isArray(lesson.videoQuestions) ? lesson.videoQuestions : [])
+        .find((question: any) => {
+          const answer = snapshot.answerMap.get(Number(question.id));
+          return !isInteractiveQuestionAnswered(question, answer);
+        });
+
+      if (unansweredInteractive) {
+        throw buildAppError('กรุณาตอบคำถาม interactive ให้ครบก่อนจบบทเรียน', 409, 'INTERACTIVE_INCOMPLETE');
+      }
+
+      const effectiveWatchedSeconds = Math.max(watchedSeconds, Number(lesson.video?.duration ?? watchedSeconds));
+      const progress = await coursesRepository.markLessonCompleted(userId, lessonId, effectiveWatchedSeconds, tx);
+      const updatedSnapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const summary = buildEnrollmentSummary(updatedSnapshot);
+
+      await coursesRepository.updateEnrollmentProgress(
+        userId,
+        courseId,
+        summary.completionPercent,
+        summary.isCompleted,
+        {
+          watchPercent: summary.watchPercent,
+          lastAccessedLessonId: lessonId,
+        },
+        tx,
+      );
+
+      return {
+        lessonId,
+        isCompleted: true,
+        completionPercent: summary.completionPercent,
+        progressPercent: summary.completionPercent,
+        updatedAt: progress.updatedAt,
+      };
+    });
   },
 
   async getLessonQuiz(lessonId: number) {
@@ -1279,11 +1489,17 @@ export const coursesService = {
       return null;
     }
 
+    const deletedVideo = await coursesRepository.deleteVideo(id);
+
     if (video.provider === 'VIMEO') {
-      await vimeoService.deleteVideo(video.resourceId);
+      try {
+        await vimeoService.deleteVideo(video.resourceId);
+      } catch (error) {
+        console.error(`Failed to delete Vimeo asset for video ${id}:`, error);
+      }
     }
 
-    return await coursesRepository.deleteVideo(id);
+    return deletedVideo;
   },
 
   async resolveVimeoVideo(data: ResolveVimeoVideoInput) {
