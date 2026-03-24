@@ -52,6 +52,19 @@ export const userVideoAnswers = pgTable('user_video_answers', {
   userVideoAnswersUserQuestionUnique: uniqueIndex('user_video_answers_user_question_unique_idx').on(table.userId, table.videoQuestionId),
 }));
 
+export const courseReviews = pgTable('course_reviews', {
+  id: serial('id').primaryKey(),
+  courseId: integer('course_id').notNull().references(() => courses.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  rating: integer('rating').notNull(),
+  title: varchar('title', { length: 255, notNull: false }),
+  body: text('body', { notNull: false }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  courseReviewsUnique: uniqueIndex('course_reviews_unique_idx').on(table.courseId, table.userId),
+}));
+
 
 
 // Relations
@@ -100,5 +113,16 @@ export const userVideoAnswersRelations = relations(userVideoAnswers, ({ one }) =
   videoQuestion: one(videoQuestions, {
     fields: [userVideoAnswers.videoQuestionId],
     references: [videoQuestions.id],
+  }),
+}));
+
+export const courseReviewsRelations = relations(courseReviews, ({ one }) => ({
+  user: one(users, {
+    fields: [courseReviews.userId],
+    references: [users.id],
+  }),
+  course: one(courses, {
+    fields: [courseReviews.courseId],
+    references: [courses.id],
   }),
 }));

@@ -208,6 +208,16 @@ export const completeVideoUploadSchema = z.object({
   duration: z.number().int().nonnegative().optional(),
 });
 
+export const reviewListQuerySchema = z.object({
+  limit: z.string().optional(),
+});
+
+export const createCourseReviewSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  title: z.string().min(1).max(255).optional(),
+  body: z.string().min(1).max(2000).optional(),
+});
+
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type CreateSubcategoryInput = z.infer<typeof createSubcategorySchema>;
@@ -231,6 +241,8 @@ export type CreateExamInput = z.infer<typeof createExamSchema>;
 export type UpdateExamInput = z.infer<typeof updateExamSchema>;
 export type CreateExamQuestionInput = z.infer<typeof createExamQuestionSchema>;
 export type UpdateExamQuestionInput = z.infer<typeof updateExamQuestionSchema>;
+export type ReviewListQueryInput = z.infer<typeof reviewListQuerySchema>;
+export type CreateCourseReviewInput = z.infer<typeof createCourseReviewSchema>;
 export const resolveVimeoVideoSchema = z.object({
   url: z.string().min(1).optional(),
   resourceId: z.string().min(1).optional(),

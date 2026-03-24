@@ -48,6 +48,7 @@ import type {
   UpdateExamQuestionInput,
   CreateVideoUploadInitiateInput,
   CompleteVideoUploadInput,
+  CreateCourseReviewInput,
   ResolveVimeoVideoInput,
   ImportVimeoVideoInput,
 } from './courses.schema.js';
@@ -229,6 +230,18 @@ function normalizeVideoForResponse(video: any) {
       lessonUsageCount,
       totalUsageCount,
     },
+  };
+}
+
+function normalizeCourseReview(review: any) {
+  return {
+    id: Number(review.id),
+    rating: Number(review.rating ?? 0),
+    title: review.title ?? null,
+    body: review.body ?? null,
+    reviewerName: review.reviewerName ?? 'Anonymous',
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
   };
 }
 
@@ -745,6 +758,43 @@ export const coursesService = {
   async getPublishedCourse(id: number) {
     const course = await coursesRepository.getPublishedCourseById(id);
     return course ? normalizeCourseForPublic(course) : null;
+  },
+
+  async getCourseReviews(courseId: number, limit?: number) {
+    const stats = await coursesRepository.getCourseReviewStats(courseId);
+    const reviews = await coursesRepository.listCourseReviews(courseId, limit ?? 5);
+    return {
+      reviews: reviews.map((review) => normalizeCourseReview(review)),
+      reviewsCount: stats.reviewsCount,
+      rating: stats.reviewsCount > 0 ? Number(stats.averageRating.toFixed(1)) : Number(0),
+    };
+  },
+
+  async getCourseReviewEligibility(courseId: number, userId: number) {
+    const enrollment = await coursesRepository.findEnrollment(userId, courseId);
+    if (!enrollment) {
+      return { canReview: false };
+    }
+    const hasCompleted = await coursesRepository.hasUserCompletedCourse(userId, courseId);
+    return { canReview: hasCompleted };
+  },
+
+  async submitCourseReview(courseId: number, userId: number, payload: CreateCourseReviewInput) {
+    await getEnrollmentOrThrow(userId, courseId);
+    const hasCompleted = await coursesRepository.hasUserCompletedCourse(userId, courseId);
+    if (!hasCompleted) {
+      throw buildAppError('กรุณาเรียนจบคอร์สก่อนให้คะแนน', 403, 'COURSE_INCOMPLETE');
+    }
+
+    const review = await coursesRepository.upsertCourseReview({
+      courseId,
+      userId,
+      rating: payload.rating,
+      title: payload.title ?? null,
+      body: payload.body ?? null,
+    });
+
+    return normalizeCourseReview(review);
   },
 
   async getCourseLearning(id: number, userId: number) {

@@ -43,6 +43,8 @@ import {
   videoListQuerySchema,
   resolveVimeoVideoSchema,
   importVimeoVideoSchema,
+  reviewListQuerySchema,
+  createCourseReviewSchema,
 } from './courses.schema.js';
 
 export async function coursesRoutes(app: FastifyInstance) {
@@ -73,6 +75,16 @@ export async function coursesRoutes(app: FastifyInstance) {
         params: courseParamsSchema,
       },
       handler: coursesController.getPublicCourse,
+    });
+
+    typedPublicApp.get('/public/courses/:id/reviews', {
+      schema: {
+        tags: ['Public - Courses'],
+        summary: 'Get reviews and rating summary for a course',
+        params: courseParamsSchema,
+        querystring: reviewListQuerySchema,
+      },
+      handler: coursesController.getCourseReviews,
     });
   });
 
@@ -160,6 +172,25 @@ export async function coursesRoutes(app: FastifyInstance) {
         params: courseParamsSchema,
       },
       handler: coursesController.getCourseProgress,
+    });
+
+    typedApp.get('/courses/:courseId/reviews/eligibility', {
+      schema: {
+        tags: ['Courses - Reviews'],
+        summary: 'Check if current user can submit a review for a course',
+        params: courseIdParamsSchema,
+      },
+      handler: coursesController.getCourseReviewEligibility,
+    });
+
+    typedApp.post('/courses/:courseId/reviews', {
+      schema: {
+        tags: ['Courses - Reviews'],
+        summary: 'Submit or update a course review after completion',
+        params: courseIdParamsSchema,
+        body: createCourseReviewSchema,
+      },
+      handler: coursesController.createCourseReview,
     });
 
     typedApp.post('/courses/:id/enroll', {

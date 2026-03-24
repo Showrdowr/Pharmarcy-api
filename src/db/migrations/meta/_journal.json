@@ -22,6 +22,36 @@
       "when": 1775000000000,
       "tag": "0002_add_enrollment_learning_state",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1775093200000,
+      "tag": "0003_add_course_capacity_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775179600000,
+      "tag": "0004_add_missing_learning_schema",
+      "breakpoints": true
+    }
+    ,
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1775250000000,
+      "tag": "0005_add_user_video_answers_index",
+      "breakpoints": true
+    }
+    ,
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1775330000000,
+      "tag": "0006_create_course_reviews",
+      "breakpoints": true
     }
   ]
 }

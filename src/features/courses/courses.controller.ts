@@ -28,6 +28,8 @@ import type {
   CompleteVideoUploadInput,
   ResolveVimeoVideoInput,
   ImportVimeoVideoInput,
+  ReviewListQueryInput,
+  CreateCourseReviewInput,
   VideoListQueryInput,
 } from './courses.schema.js';
 
@@ -62,6 +64,14 @@ function parseVideoListFilters(query: VideoListQueryInput) {
     page: Number.isNaN(page) ? 1 : Math.max(1, page),
     limit: Number.isNaN(limit) ? 20 : Math.min(100, Math.max(1, limit)),
   };
+}
+
+function parseReviewLimit(query: ReviewListQueryInput) {
+  const limit = query.limit ? parseInt(query.limit, 10) : undefined;
+  if (!limit || Number.isNaN(limit)) {
+    return undefined;
+  }
+  return Math.min(20, Math.max(1, limit));
 }
 
 export const coursesController = {
@@ -155,6 +165,15 @@ export const coursesController = {
     return reply.send({ data: course });
   },
 
+  async getCourseReviews(
+    request: FastifyRequest<{ Params: { id: number }; Querystring: ReviewListQueryInput }>,
+    reply: FastifyReply
+  ) {
+    const limit = parseReviewLimit(request.query);
+    const reviews = await coursesService.getCourseReviews(request.params.id, limit);
+    return reply.send({ data: reviews });
+  },
+
   async listCourses(
     request: FastifyRequest<{ Querystring: { categoryId?: string; search?: string; limit?: string } }>,
     reply: FastifyReply
@@ -184,6 +203,22 @@ export const coursesController = {
   async getCourseProgress(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
     const progress = await coursesService.getCourseProgress(request.params.id, getUserId(request));
     return reply.send({ data: progress });
+  },
+
+  async getCourseReviewEligibility(
+    request: FastifyRequest<{ Params: { courseId: number } }>,
+    reply: FastifyReply
+  ) {
+    const eligibility = await coursesService.getCourseReviewEligibility(request.params.courseId, getUserId(request));
+    return reply.send({ data: eligibility });
+  },
+
+  async createCourseReview(
+    request: FastifyRequest<{ Params: { courseId: number }; Body: CreateCourseReviewInput }>,
+    reply: FastifyReply
+  ) {
+    const review = await coursesService.submitCourseReview(request.params.courseId, getUserId(request), request.body);
+    return reply.status(201).send({ data: review });
   },
 
   async createCourse(request: FastifyRequest<{ Body: CreateCourseInput }>, reply: FastifyReply) {

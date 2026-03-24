@@ -18,10 +18,12 @@ import {
   certificates,
   userLessonProgress,
   userVideoAnswers,
+  courseReviews,
+  users,
   orderItems,
   cartItems,
 } from '../../db/schema/index.js';
-import { eq, and, desc, asc, count, inArray, sql, or, ilike, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, asc, count, inArray, sql, or, ilike, isNotNull, avg } from 'drizzle-orm';
 import type { 
   CreateCategoryInput, 
   UpdateCategoryInput,
@@ -1360,6 +1362,100 @@ export const coursesRepository = {
     return result?.count ?? 0;
   },
 
+  async listCourseReviews(courseId: number, limit = 5) {
+    return await db
+      .select({
+        id: courseReviews.id,
+        rating: courseReviews.rating,
+        title: courseReviews.title,
+        body: courseReviews.body,
+        createdAt: courseReviews.createdAt,
+        updatedAt: courseReviews.updatedAt,
+        reviewerName: users.fullName,
+      })
+      .from(courseReviews)
+      .leftJoin(users, eq(users.id, courseReviews.userId))
+      .where(eq(courseReviews.courseId, courseId))
+      .orderBy([desc(courseReviews.createdAt), desc(courseReviews.id)])
+      .limit(limit);
+  },
+
+  async getCourseReviewStats(courseId: number) {
+    const [row] = await db
+      .select({
+        reviewsCount: count(courseReviews.id),
+        averageRating: avg(courseReviews.rating),
+      })
+      .from(courseReviews)
+      .where(eq(courseReviews.courseId, courseId));
+
+    return {
+      reviewsCount: Number(row?.reviewsCount ?? 0),
+      averageRating: Number(row?.averageRating ?? 0),
+    };
+  },
+
+  async upsertCourseReview(data: {
+    userId: number;
+    courseId: number;
+    rating: number;
+    title?: string | null;
+    body?: string | null;
+  }) {
+    const [review] = await db
+      .insert(courseReviews)
+      .values({
+        courseId: data.courseId,
+        userId: data.userId,
+        rating: data.rating,
+        title: data.title ?? null,
+        body: data.body ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [courseReviews.courseId, courseReviews.userId],
+        set: {
+          rating: data.rating,
+          title: data.title ?? null,
+          body: data.body ?? null,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    return review;
+  },
+
+  async hasUserCompletedCourse(userId: number, courseId: number) {
+    const lessonRows = await db
+      .select({ id: lessons.id })
+      .from(lessons)
+      .where(eq(lessons.courseId, courseId));
+
+    const lessonIds = lessonRows
+      .map((lesson) => lesson.id)
+      .filter((id): id is number => Number.isFinite(Number(id)));
+
+    if (lessonIds.length === 0) {
+      return false;
+    }
+
+    const [completed] = await db
+      .select({
+        count: count(userLessonProgress.lessonId),
+      })
+      .from(userLessonProgress)
+      .where(
+        and(
+          eq(userLessonProgress.userId, userId),
+          eq(userLessonProgress.isCompleted, true),
+          inArray(userLessonProgress.lessonId, lessonIds)
+        )
+      );
+
+    const completedCount = Number(completed?.count ?? 0);
+    return completedCount >= lessonIds.length;
+  },
+
   async attachCourseSummaries<T extends Array<any>>(courseRows: T, tx?: DbConnection): Promise<T> {
     if (courseRows.length === 0) {
       return courseRows;
@@ -1442,6 +1538,11 @@ export const coursesRepository = {
       }));
 
     const finalExam = await this.getExamByCourseId(course.id);
+    const reviewStats = await this.getCourseReviewStats(course.id);
+    const averageRating =
+      reviewStats.reviewsCount > 0
+        ? Number(reviewStats.averageRating.toFixed(1))
+        : Number(course.rating ?? 0);
 
     return {
       ...course,
@@ -1460,6 +1561,8 @@ export const coursesRepository = {
           }))
         : [],
       exam: finalExam,
+      reviewsCount: reviewStats.reviewsCount,
+      rating: Number.isFinite(averageRating) ? averageRating : 0,
     } as T;
   },
 };
