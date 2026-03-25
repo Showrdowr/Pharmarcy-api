@@ -52,6 +52,34 @@
       "when": 1775330000000,
       "tag": "0006_create_course_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776000000000,
+      "tag": "0003_add_course_audience",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776000001000,
+      "tag": "0004_add_missing_course_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776000002000,
+      "tag": "0005_add_lesson_quiz_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776000003000,
+      "tag": "0006_add_course_cancellations_and_refunds",
+      "breakpoints": true
     }
   ]
 }

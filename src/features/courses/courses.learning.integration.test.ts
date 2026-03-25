@@ -195,7 +195,7 @@ async function seedLearningFixture() {
     status: 'PUBLISHED',
     publishedAt: new Date('2026-03-20T00:00:00.000Z'),
     hasCertificate: false,
-    cpeCredits: 2,
+    cpeCredits: '2',
   }).returning();
   insertedIds.courseIds.push(course.id);
 

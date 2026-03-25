@@ -21,6 +21,13 @@ import {
   isLessonUnlocked as isLessonUnlockedByIndex,
 } from './learning-access.js';
 import { deriveVideoStatus, type VideoStatus } from './video-status.js';
+import {
+  canViewerAccessCourse,
+  canViewerSeeCourse,
+  normalizeCourseAudience,
+  resolveCourseViewerRole,
+  type CourseAccessUser,
+} from './course-audience.js';
 import { vimeoService } from '../../services/vimeo.service.js';
 import type {
   CreateCategoryInput,
@@ -42,6 +49,8 @@ import type {
   UpdateLessonQuizInput,
   CreateLessonQuizQuestionInput,
   UpdateLessonQuizQuestionInput,
+  CreateLessonQuizAttemptInput,
+  CancelCourseInput,
   CreateExamInput,
   UpdateExamInput,
   CreateExamQuestionInput,
@@ -51,6 +60,7 @@ import type {
   CreateCourseReviewInput,
   ResolveVimeoVideoInput,
   ImportVimeoVideoInput,
+  ResolveRefundRequestInput,
 } from './courses.schema.js';
 
 type LearningSnapshot = Awaited<ReturnType<typeof buildLearningSnapshot>>;
@@ -74,7 +84,22 @@ type AnswerRow = {
   updatedAt: Date | string | null;
 };
 
+type LessonQuizAttemptRow = {
+  id: number;
+  userId: number;
+  lessonQuizId: number;
+  scoreObtained: string | number | null;
+  totalScore: string | number | null;
+  scorePercent: string | number | null;
+  isPassed: boolean | null;
+  startedAt: Date | string | null;
+  finishedAt: Date | string | null;
+};
+
 type CourseStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+type EnrollmentStatus = 'ACTIVE' | 'CANCELLED' | 'REFUND_PENDING';
+type EnrolledCourseStatusFilter = 'active' | 'cancelled' | 'all';
+type RefundRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 type VideoListFilters = {
   search?: string;
   provider?: 'YOUTUBE' | 'VIMEO' | 'CLOUDFLARE' | 'S3';
@@ -95,10 +120,11 @@ const DEFAULT_CATEGORY_SEED: CreateCategoryInput[] = [
   { name: 'วิทยาลัยเภสัชกรรมโรงพยาบาล', description: 'คอร์สด้านระบบยาในโรงพยาบาลและงานคลังยา', color: 'slate' },
 ];
 
-function buildAppError(message: string, statusCode = 400, code?: string) {
+function buildAppError(message: string, statusCode = 400, code?: string, details?: unknown) {
   return Object.assign(new Error(message), {
     statusCode,
     code,
+    details,
   });
 }
 
@@ -124,6 +150,93 @@ function parseDateValue(value?: string | Date | null) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeFreeTextAnswer(value?: string | null) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLowerCase() : '';
+}
+
+function normalizeLessonQuizAttemptSummary(attempt: LessonQuizAttemptRow | null | undefined, attemptNumber: number) {
+  if (!attempt) {
+    return null;
+  }
+
+  return {
+    id: Number(attempt.id),
+    attemptNumber,
+    scoreObtained: Number(attempt.scoreObtained ?? 0),
+    totalScore: Number(attempt.totalScore ?? 0),
+    scorePercent: Number(attempt.scorePercent ?? 0),
+    isPassed: Boolean(attempt.isPassed),
+    finishedAt: attempt.finishedAt ?? null,
+  };
+}
+
+function normalizeEnrollmentStatus(value: unknown): EnrollmentStatus {
+  const candidate = String(value ?? 'ACTIVE').toUpperCase();
+  if (candidate === 'CANCELLED' || candidate === 'REFUND_PENDING') {
+    return candidate;
+  }
+  return 'ACTIVE';
+}
+
+function normalizeRefundRequestStatus(value: unknown): RefundRequestStatus | null {
+  const candidate = String(value ?? '').toUpperCase();
+  if (candidate === 'PENDING' || candidate === 'APPROVED' || candidate === 'REJECTED') {
+    return candidate;
+  }
+  return null;
+}
+
+function buildEnrollmentInactiveError(
+  status: EnrollmentStatus,
+  refundRequestStatus?: RefundRequestStatus | null,
+) {
+  if (status === 'CANCELLED') {
+    return buildAppError('คุณได้ยกเลิกคอร์สนี้แล้ว กรุณาลงเรียนอีกครั้งหากต้องการเรียนต่อ', 403, 'COURSE_ENROLLMENT_CANCELLED');
+  }
+
+  if (refundRequestStatus === 'APPROVED') {
+    return buildAppError('คอร์สนี้ถูกยกเลิกและคืนเงินแล้ว หากต้องการเรียนอีกครั้งกรุณาซื้อใหม่', 403, 'COURSE_REFUND_APPROVED');
+  }
+
+  if (refundRequestStatus === 'REJECTED') {
+    return buildAppError('คำขอคืนเงินของคอร์สนี้ถูกปฏิเสธ กรุณาติดต่อผู้ดูแลหากต้องการกลับเข้าเรียน', 403, 'COURSE_REFUND_REJECTED');
+  }
+
+  return buildAppError('คอร์สนี้อยู่ระหว่างดำเนินการคืนเงิน จึงยังไม่สามารถเข้าเรียนต่อได้', 403, 'COURSE_REFUND_PENDING');
+}
+
+function normalizeRefundRequestSummary(refundRequest: any) {
+  if (!refundRequest) {
+    return null;
+  }
+
+  return {
+    id: Number(refundRequest.id),
+    status: normalizeRefundRequestStatus(refundRequest.status) ?? 'PENDING',
+    reason: refundRequest.reason ?? null,
+    adminNote: refundRequest.adminNote ?? null,
+    requestedAt: refundRequest.requestedAt ?? null,
+    resolvedAt: refundRequest.resolvedAt ?? null,
+    resolvedByAdminId: refundRequest.resolvedByAdminId ?? null,
+    orderItemId: refundRequest.orderItemId ?? null,
+  };
+}
+
+function normalizeLessonQuizQuestionForLearner(question: any) {
+  return {
+    id: Number(question.id),
+    questionText: question.questionText,
+    questionType: question.questionType,
+    options: Array.isArray(question.options)
+      ? question.options.map((option: any, index: number) => ({
+          id: typeof option?.id === 'string' && option.id.trim() ? option.id : `option-${index + 1}`,
+          text: String(option?.text ?? ''),
+        }))
+      : [],
+    scoreWeight: Number(question.scoreWeight ?? 1),
+  };
 }
 
 function normalizeInteractiveQuestion(question: any, options?: { includeCorrectAnswer?: boolean }) {
@@ -192,9 +305,19 @@ function normalizeCourseForPublic(course: any) {
           .map((relatedCourse: any) => ({
             id: relatedCourse.id,
             title: relatedCourse.title,
+            titleEn: relatedCourse.titleEn ?? null,
+            description: relatedCourse.description ?? null,
+            descriptionEn: relatedCourse.descriptionEn ?? null,
             thumbnail: relatedCourse.thumbnail,
             authorName: relatedCourse.authorName,
+            price: Number(relatedCourse.price ?? 0),
+            cpeCredits: Number(relatedCourse.cpeCredits ?? 0),
+            audience: normalizeCourseAudience(relatedCourse.audience),
             enrolledCount: relatedCourse.enrolledCount ?? relatedCourse.enrollmentsCount ?? 0,
+            enrollmentsCount: relatedCourse.enrolledCount ?? relatedCourse.enrollmentsCount ?? 0,
+            totalDurationSeconds: Number(relatedCourse.totalDurationSeconds ?? 0),
+            durationMinutes: Number(relatedCourse.durationMinutes ?? 0),
+            category: relatedCourse.category ?? null,
           }))
       : [],
     lessons: Array.isArray(normalized.lessons)
@@ -293,8 +416,12 @@ function ensurePublishedScalarRequirements(courseLike: Record<string, any>) {
     throw buildAppError('กรุณาอัปโหลดรูปปกก่อนเผยแพร่', 400);
   }
 
-  if (!courseLike.maxStudents || Number(courseLike.maxStudents) <= 0) {
-    throw buildAppError('กรุณาระบุจำนวนรับมากกว่า 0 ก่อนเผยแพร่', 400);
+  if (
+    courseLike.maxStudents !== undefined
+    && courseLike.maxStudents !== null
+    && Number(courseLike.maxStudents) < 0
+  ) {
+    throw buildAppError('จำนวนรับต้องไม่น้อยกว่า 0', 400);
   }
 
   const courseEndAt = parseDateValue(courseLike.courseEndAt);
@@ -342,6 +469,53 @@ function validateCourseForStatus(courseLike: Record<string, any>) {
     ensurePublishedScalarRequirements(courseLike);
     ensurePublishedLessonRequirements(courseLike);
   }
+}
+
+type CourseWriteReferencePayload = {
+  categoryId?: number | null;
+  subcategoryId?: number | null;
+  previewVideoId?: number | null;
+};
+
+async function sanitizeCourseWriteReferences<T extends CourseWriteReferencePayload>(
+  payload: T,
+  options?: { fallbackCategoryId?: number | null },
+) {
+  const nextPayload = { ...payload };
+
+  if (typeof nextPayload.categoryId === 'number') {
+    const category = await coursesRepository.getCategoryById(nextPayload.categoryId);
+    if (!category) {
+      throw buildAppError('ไม่พบหมวดหมู่หลักที่เลือก กรุณาเลือกใหม่', 400, 'COURSE_CATEGORY_NOT_FOUND');
+    }
+  }
+
+  const effectiveCategoryId = typeof nextPayload.categoryId === 'number'
+    ? nextPayload.categoryId
+    : typeof options?.fallbackCategoryId === 'number'
+      ? options.fallbackCategoryId
+      : null;
+
+  if (typeof nextPayload.subcategoryId === 'number') {
+    const subcategory = await coursesRepository.getSubcategoryById(nextPayload.subcategoryId);
+    if (!subcategory) {
+      throw buildAppError('ไม่พบหมวดหมู่ย่อยที่เลือก กรุณาเลือกใหม่', 400, 'COURSE_SUBCATEGORY_NOT_FOUND');
+    }
+
+    if (effectiveCategoryId !== null && Number(subcategory.categoryId) !== effectiveCategoryId) {
+      throw buildAppError('หมวดหมู่ย่อยไม่สอดคล้องกับหมวดหมู่หลักที่เลือก', 400, 'COURSE_SUBCATEGORY_MISMATCH');
+    }
+  }
+
+  if (typeof nextPayload.previewVideoId === 'number') {
+    const previewVideo = await coursesRepository.getVideoById(nextPayload.previewVideoId);
+    if (!previewVideo) {
+      console.warn(`Course write requested missing preview video ${nextPayload.previewVideoId}; clearing stale reference.`);
+      nextPayload.previewVideoId = null;
+    }
+  }
+
+  return nextPayload;
 }
 
 function calculateProgressPercent(completedLessons: number, totalLessons: number) {
@@ -396,6 +570,26 @@ function getLessonWatchThreshold(duration?: number | null) {
   }
 
   return Math.max(1, Math.floor(duration));
+}
+
+function assertLessonQuizReadyForLearner(snapshot: LearningSnapshot, lesson: any) {
+  const lessonId = Number(lesson.id);
+  const currentProgress = snapshot.progressMap.get(lessonId);
+  const watchedSeconds = Number(currentProgress?.lastWatchedSeconds ?? 0);
+  const watchThreshold = getLessonWatchThreshold(Number(lesson.video?.duration ?? 0));
+  if (watchThreshold > 0 && watchedSeconds < watchThreshold) {
+    throw buildAppError('ต้องดูวิดีโอให้จบก่อนทำ Quiz ท้ายบท', 409, 'LESSON_VIDEO_INCOMPLETE');
+  }
+
+  const unansweredInteractive = sortInteractiveQuestions(Array.isArray(lesson.videoQuestions) ? lesson.videoQuestions : [])
+    .find((question: any) => {
+      const answer = snapshot.answerMap.get(Number(question.id));
+      return !isInteractiveQuestionAnswered(question, answer);
+    });
+
+  if (unansweredInteractive) {
+    throw buildAppError('กรุณาตอบคำถาม interactive ให้ครบก่อนทำ Quiz ท้ายบท', 409, 'INTERACTIVE_INCOMPLETE');
+  }
 }
 
 function buildTrueFalseOptions() {
@@ -455,7 +649,36 @@ async function withRelatedCourses(courseId: number, relatedCourseIds?: number[])
   await coursesRepository.replaceRelatedCourses(courseId, relatedCourseIds);
 }
 
-async function getLearnerAccessibleCourseOrThrow(courseId: number, userId: number, tx?: any) {
+function filterVisibleCoursesForViewer<T extends { audience?: string | null }>(
+  courses: T[],
+  viewer?: CourseAccessUser,
+) {
+  const viewerRole = resolveCourseViewerRole(viewer);
+  return courses.filter((course) => canViewerSeeCourse(course.audience, viewerRole));
+}
+
+function filterVisibleRelatedCourses<T extends { relatedCourses?: Array<{ audience?: string | null }> }>(
+  course: T,
+  viewer?: CourseAccessUser,
+) {
+  if (!Array.isArray(course.relatedCourses)) {
+    return course;
+  }
+
+  return {
+    ...course,
+    relatedCourses: filterVisibleCoursesForViewer(course.relatedCourses, viewer),
+  };
+}
+
+function assertViewerCanAccessCourseOrThrow(course: { audience?: string | null }, viewer?: CourseAccessUser) {
+  const viewerRole = viewer ? resolveCourseViewerRole(viewer) : 'general';
+  if (!canViewerAccessCourse(course.audience, viewerRole)) {
+    throw buildAppError('คุณไม่มีสิทธิ์เข้าถึงคอร์สนี้', 403, 'COURSE_ROLE_FORBIDDEN');
+  }
+}
+
+async function getLearnerAccessibleCourseOrThrow(courseId: number, userId: number, viewer?: CourseAccessUser, tx?: any) {
   const course = await coursesRepository.getCourseForLearner(courseId, tx);
   if (!course) {
     throw buildAppError('Course not found', 404);
@@ -468,7 +691,9 @@ async function getLearnerAccessibleCourseOrThrow(courseId: number, userId: numbe
     }
   }
 
-  return normalizeCourseForAdmin(course);
+  const normalizedCourse = normalizeCourseForAdmin(course);
+  assertViewerCanAccessCourseOrThrow(normalizedCourse, viewer);
+  return normalizedCourse;
 }
 
 async function getEnrollmentOrThrow(userId: number, courseId: number, tx?: any) {
@@ -477,11 +702,17 @@ async function getEnrollmentOrThrow(userId: number, courseId: number, tx?: any) 
     throw buildAppError('กรุณาสมัครเรียนก่อนเข้าดูเนื้อหา', 403, 'COURSE_NOT_ENROLLED');
   }
 
+  const enrollmentStatus = normalizeEnrollmentStatus(enrollment.status);
+  if (enrollmentStatus !== 'ACTIVE') {
+    const refundRequest = await coursesRepository.getRefundRequestByEnrollmentId(Number(enrollment.id), tx);
+    throw buildEnrollmentInactiveError(enrollmentStatus, normalizeRefundRequestStatus(refundRequest?.status));
+  }
+
   return enrollment;
 }
 
-async function buildLearningSnapshot(courseId: number, userId: number, tx?: any) {
-  const course = await getLearnerAccessibleCourseOrThrow(courseId, userId, tx);
+async function buildLearningSnapshot(courseId: number, userId: number, viewer?: CourseAccessUser, tx?: any) {
+  const course = await getLearnerAccessibleCourseOrThrow(courseId, userId, viewer, tx);
   const enrollment = await getEnrollmentOrThrow(userId, courseId, tx);
 
   const lessons = Array.isArray(course.lessons) ? course.lessons.map((lesson: any) => normalizeLessonForResponse(lesson)) : [];
@@ -489,10 +720,14 @@ async function buildLearningSnapshot(courseId: number, userId: number, tx?: any)
   const questionIds = lessons.flatMap((lesson: any) =>
     Array.isArray(lesson.videoQuestions) ? lesson.videoQuestions.map((question: any) => Number(question.id)) : []
   );
+  const lessonQuizIds = lessons
+    .map((lesson: any) => Number(lesson.lessonQuiz?.id ?? 0))
+    .filter((quizId: number) => Number.isInteger(quizId) && quizId > 0);
 
-  const [progressRows, answerRows] = await Promise.all([
+  const [progressRows, answerRows, lessonQuizAttemptRows] = await Promise.all([
     coursesRepository.listUserLessonProgress(userId, lessonIds, tx),
     coursesRepository.listUserVideoAnswers(userId, questionIds, tx),
+    coursesRepository.listUserLessonQuizAttempts(userId, lessonQuizIds, tx),
   ]);
 
   const progressMap = new Map<number, ProgressRow>(
@@ -503,6 +738,20 @@ async function buildLearningSnapshot(courseId: number, userId: number, tx?: any)
       .filter((row) => row.videoQuestionId !== null)
       .map((row) => [Number(row.videoQuestionId), row])
   );
+  const lessonQuizAttemptMap = new Map<number, LessonQuizAttemptRow>();
+  const lessonQuizAttemptCountMap = new Map<number, number>();
+
+  for (const attempt of lessonQuizAttemptRows as LessonQuizAttemptRow[]) {
+    const lessonQuizId = Number(attempt.lessonQuizId);
+    if (!Number.isInteger(lessonQuizId) || lessonQuizId <= 0) {
+      continue;
+    }
+
+    lessonQuizAttemptCountMap.set(lessonQuizId, (lessonQuizAttemptCountMap.get(lessonQuizId) ?? 0) + 1);
+    if (!lessonQuizAttemptMap.has(lessonQuizId)) {
+      lessonQuizAttemptMap.set(lessonQuizId, attempt);
+    }
+  }
 
   const completedLessonIds = lessons
     .filter((lesson: any) => Boolean(progressMap.get(Number(lesson.id))?.isCompleted))
@@ -530,6 +779,9 @@ async function buildLearningSnapshot(courseId: number, userId: number, tx?: any)
     progressMap,
     answerRows,
     answerMap,
+    lessonQuizAttemptRows,
+    lessonQuizAttemptMap,
+    lessonQuizAttemptCountMap,
     completedLessonIds,
     lastAccessedLessonId: resolvedLastAccessedLessonId,
     watchMetrics,
@@ -705,19 +957,22 @@ export const coursesService = {
     return courseItems.map((course) => normalizeCourseForAdmin(course));
   },
 
-  async listPublishedCourses(filters?: { categoryId?: number; search?: string; limit?: number }) {
+  async listPublishedCourses(filters?: { categoryId?: number; search?: string; limit?: number }, viewer?: CourseAccessUser) {
     const courseItems = await coursesRepository.listPublishedCourses(filters);
-    return courseItems.map((course) => normalizeCourseForPublic(course));
+    const normalizedCourses = courseItems.map((course) => normalizeCourseForPublic(course));
+    return filterVisibleCoursesForViewer(normalizedCourses, viewer);
   },
 
-  async listEnrolledCourses(userId: number) {
-    const enrolledCourses = await coursesRepository.listEnrolledCourses(userId);
+  async listEnrolledCourses(userId: number, viewer?: CourseAccessUser, status: EnrolledCourseStatusFilter = 'active') {
+    const enrolledCourses = await coursesRepository.listEnrolledCourses(userId, status);
 
     return enrolledCourses.map((enrollment: any) => {
       const course = normalizeCourseThumbnail(enrollment.course || {});
       const completionPercent = Number(enrollment.progressPercent ?? 0);
       const watchPercent = Number(enrollment.watchPercent ?? 0);
       const isCompleted = Boolean(enrollment.isCompleted);
+      const enrollmentStatus = normalizeEnrollmentStatus(enrollment.status);
+      const refundRequest = normalizeRefundRequestSummary(enrollment.refundRequest);
       const completedAt = isCompleted
         ? enrollment.certificate?.issuedAt ?? enrollment.lastAccessedAt ?? enrollment.enrolledAt
         : null;
@@ -730,23 +985,34 @@ export const coursesService = {
         thumbnail: course.thumbnail ?? null,
         authorName: course.authorName ?? null,
         instructor: course.authorName ?? null,
+        price: Number(course.price ?? 0),
         cpeCredits: Number(course.cpeCredits ?? 0),
         cpe: Number(course.cpeCredits ?? 0),
+        audience: normalizeCourseAudience(course.audience),
         progressPercent: completionPercent,
         progress: completionPercent,
         completionPercent,
         watchPercent,
         status: isCompleted ? 'completed' : 'in_progress',
+        enrollmentStatus,
         courseStatus: String(course.status || 'PUBLISHED').toUpperCase(),
         enrolledAt: enrollment.enrolledAt,
         lastAccessedAt: enrollment.lastAccessedAt ?? null,
         lastAccessedLessonId: enrollment.lastAccessedLessonId ?? null,
         completedAt,
+        cancelledAt: enrollment.cancelledAt ?? null,
+        cancelReason: enrollment.cancelReason ?? null,
+        sourceOrderItemId: enrollment.sourceOrderItemId ?? null,
         certificateUrl: null,
         certificateCode: enrollment.certificate?.certificateCode ?? null,
         hasCertificate: Boolean(course.hasCertificate),
         lessonsCount: Number(course.lessonsCount ?? 0),
+        refundRequest,
+        refundRequestStatus: refundRequest?.status ?? null,
       };
+    }).filter((course) => {
+      const viewerRole = viewer ? resolveCourseViewerRole(viewer) : 'general';
+      return canViewerSeeCourse(course.audience, viewerRole);
     });
   },
 
@@ -755,9 +1021,19 @@ export const coursesService = {
     return course ? normalizeCourseForAdmin(course) : null;
   },
 
-  async getPublishedCourse(id: number) {
+  async getPublishedCourse(id: number, viewer?: CourseAccessUser) {
     const course = await coursesRepository.getPublishedCourseById(id);
-    return course ? normalizeCourseForPublic(course) : null;
+    if (!course) {
+      return null;
+    }
+
+    const normalizedCourse = normalizeCourseForPublic(course);
+    const viewerRole = resolveCourseViewerRole(viewer);
+    if (viewerRole !== 'guest' && !canViewerSeeCourse(normalizedCourse.audience, viewerRole)) {
+      throw buildAppError('คุณไม่มีสิทธิ์เข้าถึงคอร์สนี้', 403, 'COURSE_ROLE_FORBIDDEN');
+    }
+
+    return filterVisibleRelatedCourses(normalizedCourse, viewer);
   },
 
   async getCourseReviews(courseId: number, limit?: number) {
@@ -797,13 +1073,20 @@ export const coursesService = {
     return normalizeCourseReview(review);
   },
 
-  async getCourseLearning(id: number, userId: number) {
-    const snapshot = await buildLearningSnapshot(id, userId);
+  async getCourseLearning(id: number, userId: number, viewer?: CourseAccessUser) {
+    const snapshot = await buildLearningSnapshot(id, userId, viewer);
     const completedLessonSet = getCompletedLessonSet(snapshot);
     const lessons = snapshot.lessons.map((lesson: any, index: number) => {
       const lessonId = Number(lesson.id);
       const isCompleted = completedLessonSet.has(lessonId);
       const isUnlocked = isLessonUnlockedByIndex(snapshot.lessons as Array<{ id: number | string }>, index, completedLessonSet);
+      const lessonQuizId = Number(lesson.lessonQuiz?.id ?? 0);
+      const latestLessonQuizAttempt = lessonQuizId > 0
+        ? snapshot.lessonQuizAttemptMap.get(lessonQuizId) ?? null
+        : null;
+      const lessonQuizAttemptsUsed = lessonQuizId > 0
+        ? snapshot.lessonQuizAttemptCountMap.get(lessonQuizId) ?? 0
+        : 0;
 
       if (!isCompleted && !isUnlocked) {
         return buildLockedLessonLearningPayload(lesson);
@@ -855,6 +1138,11 @@ export const coursesService = {
               passingScorePercent: Number(lesson.lessonQuiz.passingScorePercent ?? 70),
               maxAttempts: lesson.lessonQuiz.maxAttempts ?? null,
               questionsCount: Array.isArray(lesson.lessonQuiz.questions) ? lesson.lessonQuiz.questions.length : 0,
+              attemptsUsed: lessonQuizAttemptsUsed,
+              remainingAttempts: lesson.lessonQuiz.maxAttempts
+                ? Math.max(0, Number(lesson.lessonQuiz.maxAttempts) - lessonQuizAttemptsUsed)
+                : null,
+              latestAttempt: normalizeLessonQuizAttemptSummary(latestLessonQuizAttempt, lessonQuizAttemptsUsed),
             }
           : null,
         progress: snapshot.progressMap.get(lessonId)
@@ -882,6 +1170,7 @@ export const coursesService = {
       description: snapshot.course.description,
       authorName: snapshot.course.authorName,
       thumbnail: snapshot.course.thumbnail,
+      audience: normalizeCourseAudience(snapshot.course.audience),
       hasCertificate: Boolean(snapshot.course.hasCertificate),
       cpeCredits: Number(snapshot.course.cpeCredits ?? 0),
       enrolledAt: snapshot.enrollment.enrolledAt,
@@ -896,12 +1185,13 @@ export const coursesService = {
     };
   },
 
-  async getCourseProgress(id: number, userId: number) {
-    const snapshot = await buildLearningSnapshot(id, userId);
+  async getCourseProgress(id: number, userId: number, viewer?: CourseAccessUser) {
+    const snapshot = await buildLearningSnapshot(id, userId, viewer);
     const completionPercent = calculateProgressPercent(snapshot.completedLessonIds.length, snapshot.lessons.length);
 
     return {
       courseId: Number(snapshot.course.id),
+      audience: normalizeCourseAudience(snapshot.course.audience),
       completedLessons: snapshot.completedLessonIds,
       lastAccessedLessonId: snapshot.lastAccessedLessonId ?? undefined,
       watchPercent: snapshot.watchMetrics.watchPercent,
@@ -914,7 +1204,7 @@ export const coursesService = {
 
   async createCourse(data: CreateCourseInput, adminId?: string, ipAddress?: string) {
     validateThumbnailSizeLimit(data.thumbnail);
-    const payload = normalizeThumbnailForStorage(data);
+    const payload = await sanitizeCourseWriteReferences(normalizeThumbnailForStorage(data));
     validateCourseForStatus(payload);
 
     const { relatedCourseIds, ...rest } = payload;
@@ -950,7 +1240,10 @@ export const coursesService = {
       return null;
     }
 
-    const payload = normalizeThumbnailForStorage(data);
+    const payload = await sanitizeCourseWriteReferences(
+      normalizeThumbnailForStorage(data),
+      { fallbackCategoryId: Number(existingCourse.categoryId ?? 0) || null },
+    );
     const mergedCourse = {
       ...existingCourse,
       ...payload,
@@ -1011,7 +1304,12 @@ export const coursesService = {
       throw buildAppError(
         'ไม่สามารถลบคอร์สที่มีประวัติการสมัครเรียน ใบประกาศนียบัตร หรือคำสั่งซื้อได้ กรุณาเปลี่ยนสถานะเป็น ARCHIVED แทน',
         409,
-        'COURSE_DELETE_CONFLICT'
+        'COURSE_DELETE_CONFLICT',
+        {
+          ...deletionBlockers,
+          canHardDelete: false,
+          recommendedAdminAction: 'archive',
+        }
       );
     }
 
@@ -1201,7 +1499,7 @@ export const coursesService = {
     return await coursesRepository.updateVideoQuestion(id, payload);
   },
 
-  async answerVideoQuestion(id: number, userId: number, data: CreateVideoQuestionAnswerInput) {
+  async answerVideoQuestion(id: number, userId: number, data: CreateVideoQuestionAnswerInput, viewer?: CourseAccessUser) {
     const question = await coursesRepository.getVideoQuestionById(id);
     if (!question) {
       throw buildAppError('Video question not found', 404);
@@ -1233,7 +1531,7 @@ export const coursesService = {
     return await db.transaction(async (tx) => {
       await coursesRepository.lockEnrollment(userId, courseId, tx);
 
-      const snapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const snapshot = await buildLearningSnapshot(courseId, userId, viewer, tx);
       assertLessonAccessibleForLearner(snapshot, lessonId);
 
       const answer = await coursesRepository.upsertVideoQuestionAnswer(userId, id, {
@@ -1251,7 +1549,7 @@ export const coursesService = {
     });
   },
 
-  async updateLessonProgress(id: number, userId: number, data: UpdateLessonProgressInput) {
+  async updateLessonProgress(id: number, userId: number, data: UpdateLessonProgressInput, viewer?: CourseAccessUser) {
     const lesson = await coursesRepository.getLessonById(id);
     if (!lesson) {
       throw buildAppError('Lesson not found', 404);
@@ -1261,7 +1559,7 @@ export const coursesService = {
     return await db.transaction(async (tx) => {
       await coursesRepository.lockEnrollment(userId, courseId, tx);
 
-      const snapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const snapshot = await buildLearningSnapshot(courseId, userId, viewer, tx);
       const { lesson: learningLesson } = assertLessonAccessibleForLearner(snapshot, id);
 
       const currentProgress = snapshot.progressMap.get(id);
@@ -1284,7 +1582,7 @@ export const coursesService = {
         isCompleted: Boolean(currentProgress?.isCompleted),
       }, tx);
 
-      const updatedSnapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const updatedSnapshot = await buildLearningSnapshot(courseId, userId, viewer, tx);
       const summary = buildEnrollmentSummary(updatedSnapshot);
       await coursesRepository.updateEnrollmentProgress(
         userId,
@@ -1302,11 +1600,11 @@ export const coursesService = {
     });
   },
 
-  async completeLesson(courseId: number, lessonId: number, userId: number) {
+  async completeLesson(courseId: number, lessonId: number, userId: number, viewer?: CourseAccessUser) {
     return await db.transaction(async (tx) => {
       await coursesRepository.lockEnrollment(userId, courseId, tx);
 
-      const snapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const snapshot = await buildLearningSnapshot(courseId, userId, viewer, tx);
       const { lesson } = assertLessonAccessibleForLearner(snapshot, lessonId);
       const currentProgress = snapshot.progressMap.get(lessonId);
 
@@ -1349,9 +1647,27 @@ export const coursesService = {
         throw buildAppError('กรุณาตอบคำถาม interactive ให้ครบก่อนจบบทเรียน', 409, 'INTERACTIVE_INCOMPLETE');
       }
 
+      const lessonQuiz = lesson.lessonQuiz ?? null;
+      if (lessonQuiz) {
+        const lessonQuizId = Number(lessonQuiz.id);
+        const lessonQuizAttemptsUsed = snapshot.lessonQuizAttemptCountMap.get(lessonQuizId) ?? 0;
+        const latestLessonQuizAttempt = snapshot.lessonQuizAttemptMap.get(lessonQuizId) ?? null;
+        if (!latestLessonQuizAttempt?.isPassed) {
+          const maxAttempts = Number(lessonQuiz.maxAttempts ?? 0);
+          const lessonQuizCode = maxAttempts > 0 && lessonQuizAttemptsUsed >= maxAttempts
+            ? 'LESSON_QUIZ_ATTEMPTS_EXHAUSTED'
+            : 'LESSON_QUIZ_INCOMPLETE';
+          const lessonQuizMessage = lessonQuizCode === 'LESSON_QUIZ_ATTEMPTS_EXHAUSTED'
+            ? 'คุณใช้สิทธิ์ทำแบบทดสอบท้ายบทครบแล้วและยังไม่ผ่าน'
+            : 'กรุณาทำแบบทดสอบท้ายบทให้ผ่านก่อนจบบทเรียน';
+
+          throw buildAppError(lessonQuizMessage, 409, lessonQuizCode);
+        }
+      }
+
       const effectiveWatchedSeconds = Math.max(watchedSeconds, Number(lesson.video?.duration ?? watchedSeconds));
       const progress = await coursesRepository.markLessonCompleted(userId, lessonId, effectiveWatchedSeconds, tx);
-      const updatedSnapshot = await buildLearningSnapshot(courseId, userId, tx);
+      const updatedSnapshot = await buildLearningSnapshot(courseId, userId, viewer, tx);
       const summary = buildEnrollmentSummary(updatedSnapshot);
 
       await coursesRepository.updateEnrollmentProgress(
@@ -1372,6 +1688,182 @@ export const coursesService = {
         completionPercent: summary.completionPercent,
         progressPercent: summary.completionPercent,
         updatedAt: progress.updatedAt,
+      };
+    });
+  },
+
+  async getLessonQuizRuntime(lessonId: number, userId: number, viewer?: CourseAccessUser) {
+    const lesson = await coursesRepository.getLessonById(lessonId);
+    if (!lesson?.courseId) {
+      throw buildAppError('Lesson not found', 404);
+    }
+
+    const snapshot = await buildLearningSnapshot(Number(lesson.courseId), userId, viewer);
+    const { lesson: accessibleLesson } = assertLessonAccessibleForLearner(snapshot, lessonId);
+    const lessonQuiz = accessibleLesson.lessonQuiz ?? null;
+
+    if (!lessonQuiz) {
+      throw buildAppError('ยังไม่มีแบบทดสอบท้ายบทสำหรับบทเรียนนี้', 404, 'LESSON_QUIZ_NOT_FOUND');
+    }
+
+    assertLessonQuizReadyForLearner(snapshot, accessibleLesson);
+
+    const lessonQuizId = Number(lessonQuiz.id);
+    const attemptsUsed = snapshot.lessonQuizAttemptCountMap.get(lessonQuizId) ?? 0;
+    const latestAttempt = snapshot.lessonQuizAttemptMap.get(lessonQuizId) ?? null;
+    const maxAttempts = Number(lessonQuiz.maxAttempts ?? 0);
+
+    return {
+      id: lessonQuizId,
+      lessonId: Number(accessibleLesson.id),
+      passingScorePercent: Number(lessonQuiz.passingScorePercent ?? 70),
+      maxAttempts: lessonQuiz.maxAttempts ?? null,
+      attemptsUsed,
+      remainingAttempts: maxAttempts > 0 ? Math.max(0, maxAttempts - attemptsUsed) : null,
+      latestAttempt: normalizeLessonQuizAttemptSummary(latestAttempt, attemptsUsed),
+      questions: Array.isArray(lessonQuiz.questions)
+        ? lessonQuiz.questions.map((question: any) => normalizeLessonQuizQuestionForLearner(question))
+        : [],
+    };
+  },
+
+  async submitLessonQuizAttempt(lessonId: number, userId: number, data: CreateLessonQuizAttemptInput, viewer?: CourseAccessUser) {
+    const lesson = await coursesRepository.getLessonById(lessonId);
+    if (!lesson?.courseId) {
+      throw buildAppError('Lesson not found', 404);
+    }
+
+    return await db.transaction(async (tx) => {
+      const courseId = Number(lesson.courseId);
+      await coursesRepository.lockEnrollment(userId, courseId, tx);
+
+      const snapshot = await buildLearningSnapshot(courseId, userId, viewer, tx);
+      const { lesson: accessibleLesson } = assertLessonAccessibleForLearner(snapshot, lessonId);
+      const lessonQuiz = accessibleLesson.lessonQuiz ?? null;
+
+      if (!lessonQuiz) {
+        throw buildAppError('ยังไม่มีแบบทดสอบท้ายบทสำหรับบทเรียนนี้', 404, 'LESSON_QUIZ_NOT_FOUND');
+      }
+
+      assertLessonQuizReadyForLearner(snapshot, accessibleLesson);
+
+      const lessonQuizId = Number(lessonQuiz.id);
+      const attemptsUsed = snapshot.lessonQuizAttemptCountMap.get(lessonQuizId) ?? 0;
+      const maxAttempts = Number(lessonQuiz.maxAttempts ?? 0);
+      if (maxAttempts > 0 && attemptsUsed >= maxAttempts) {
+        throw buildAppError('คุณใช้สิทธิ์ทำแบบทดสอบท้ายบทครบแล้ว', 409, 'LESSON_QUIZ_ATTEMPTS_EXHAUSTED');
+      }
+
+      const quizQuestions = Array.isArray(lessonQuiz.questions) ? lessonQuiz.questions : [];
+      if (quizQuestions.length === 0) {
+        throw buildAppError('แบบทดสอบท้ายบทนี้ยังไม่มีคำถาม', 400, 'LESSON_QUIZ_EMPTY');
+      }
+
+      const answerMap = new Map<number, string>(
+        (Array.isArray(data.answers) ? data.answers : []).map((answer) => [Number(answer.questionId), answer.answerGiven.trim()])
+      );
+
+      const evaluatedAnswers: Array<{
+        questionId: number;
+        answerGiven: string;
+        isCorrect: boolean;
+        pointsEarned: number;
+        scoreWeight: number;
+      }> = quizQuestions.map((question: any) => {
+        const questionId = Number(question.id);
+        const rawAnswer = answerMap.get(questionId)?.trim() ?? '';
+        if (!rawAnswer) {
+          throw buildAppError('กรุณาตอบคำถามให้ครบทุกข้อก่อนส่งแบบทดสอบ', 400, 'LESSON_QUIZ_ANSWER_INCOMPLETE');
+        }
+
+        let normalizedAnswer = rawAnswer;
+        let normalizedCorrectAnswer = typeof question.correctAnswer === 'string' ? question.correctAnswer.trim() : '';
+
+        if (question.questionType === 'MULTIPLE_CHOICE' || question.questionType === 'TRUE_FALSE') {
+          const resolvedAnswer = resolveInteractiveChoiceAnswer(
+            Array.isArray(question.options) ? question.options : [],
+            rawAnswer,
+          );
+
+          if (!resolvedAnswer) {
+            throw buildAppError('คำตอบไม่ถูกต้องตามตัวเลือกที่กำหนด', 400, 'LESSON_QUIZ_INVALID_OPTION');
+          }
+
+          normalizedAnswer = resolvedAnswer;
+          normalizedCorrectAnswer = resolveInteractiveChoiceAnswer(
+            Array.isArray(question.options) ? question.options : [],
+            normalizedCorrectAnswer,
+          ) ?? normalizedCorrectAnswer;
+        } else {
+          normalizedAnswer = normalizeFreeTextAnswer(rawAnswer);
+          normalizedCorrectAnswer = normalizeFreeTextAnswer(normalizedCorrectAnswer);
+        }
+
+        const isCorrect = normalizedAnswer === normalizedCorrectAnswer;
+        const scoreWeight = Number(question.scoreWeight ?? 1);
+
+        return {
+          questionId,
+          answerGiven: rawAnswer,
+          isCorrect,
+          pointsEarned: isCorrect ? scoreWeight : 0,
+          scoreWeight,
+        };
+      });
+
+      const scoreObtained = evaluatedAnswers.reduce((total, answer) => total + answer.pointsEarned, 0);
+      const totalScore = evaluatedAnswers.reduce((total, answer) => total + answer.scoreWeight, 0);
+      const scorePercent = totalScore > 0 ? Number(((scoreObtained / totalScore) * 100).toFixed(2)) : 0;
+      const isPassed = scorePercent >= Number(lessonQuiz.passingScorePercent ?? 70);
+
+      const attempt = await coursesRepository.createLessonQuizAttempt(
+        userId,
+        lessonQuizId,
+        {
+          scoreObtained,
+          totalScore,
+          scorePercent,
+          isPassed,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
+        tx,
+      );
+
+      await coursesRepository.createLessonQuizAnswers(
+        Number(attempt.id),
+        evaluatedAnswers.map((answer) => ({
+          lessonQuizQuestionId: answer.questionId,
+          answerGiven: answer.answerGiven,
+          isCorrect: answer.isCorrect,
+          pointsEarned: answer.pointsEarned,
+        })),
+        tx,
+      );
+
+      await coursesRepository.touchEnrollment(userId, courseId, lessonId, tx);
+
+      const nextAttemptCount = attemptsUsed + 1;
+
+      return {
+        attemptId: Number(attempt.id),
+        quizId: lessonQuizId,
+        lessonId,
+        attemptNumber: nextAttemptCount,
+        maxAttempts: lessonQuiz.maxAttempts ?? null,
+        attemptsUsed: nextAttemptCount,
+        remainingAttempts: maxAttempts > 0 ? Math.max(0, maxAttempts - nextAttemptCount) : null,
+        scoreObtained,
+        totalScore,
+        scorePercent,
+        isPassed,
+        finishedAt: attempt.finishedAt ?? null,
+        answers: evaluatedAnswers.map((answer) => ({
+          questionId: answer.questionId,
+          answerGiven: answer.answerGiven,
+          isCorrect: answer.isCorrect,
+          pointsEarned: answer.pointsEarned,
+        })),
       };
     });
   },
@@ -1664,15 +2156,36 @@ export const coursesService = {
     }
   },
 
-  async enrollCourse(courseId: number, userId: number) {
+  async enrollCourse(courseId: number, userId: number, viewer?: CourseAccessUser) {
     const course = await coursesRepository.getPublishedCourseById(courseId);
     if (!course) {
       throw buildAppError('Course not found', 404);
     }
 
+    assertViewerCanAccessCourseOrThrow(normalizeCourseForAdmin(course), viewer);
+
     const existingEnrollment = await coursesRepository.findEnrollment(userId, courseId);
     if (existingEnrollment) {
-      return existingEnrollment;
+      const enrollmentStatus = normalizeEnrollmentStatus(existingEnrollment.status);
+      if (enrollmentStatus === 'ACTIVE') {
+        return existingEnrollment;
+      }
+
+      if (enrollmentStatus === 'CANCELLED') {
+        if (Number(course.price ?? 0) > 0) {
+          throw buildAppError('คอร์สนี้ถูกยกเลิกไปแล้ว หากต้องการเรียนอีกครั้งกรุณาซื้อใหม่', 409, 'COURSE_REPURCHASE_REQUIRED');
+        }
+
+        const reactivatedEnrollment = await coursesRepository.reactivateEnrollment(userId, courseId);
+        if (!reactivatedEnrollment) {
+          throw buildAppError('ไม่สามารถลงเรียนคอร์สนี้อีกครั้งได้', 500, 'COURSE_REENROLL_FAILED');
+        }
+
+        return reactivatedEnrollment;
+      }
+
+      const refundRequest = await coursesRepository.getRefundRequestByEnrollmentId(Number(existingEnrollment.id));
+      throw buildEnrollmentInactiveError(enrollmentStatus, normalizeRefundRequestStatus(refundRequest?.status));
     }
 
     const maxStudents = course.maxStudents ? Number(course.maxStudents) : null;
@@ -1683,6 +2196,188 @@ export const coursesService = {
       }
     }
 
-    return await coursesRepository.createEnrollment(userId, courseId);
+    const paidOrderItem = await coursesRepository.findLatestPaidOrderItemForUserCourse(userId, courseId);
+    return await coursesRepository.createEnrollment(userId, courseId, paidOrderItem?.orderItemId ?? null);
+  },
+
+  async cancelCourse(courseId: number, userId: number, data: CancelCourseInput, viewer?: CourseAccessUser) {
+    const course = await getLearnerAccessibleCourseOrThrow(courseId, userId, viewer);
+    const existingEnrollment = await coursesRepository.findEnrollment(userId, courseId);
+
+    if (!existingEnrollment) {
+      throw buildAppError('ยังไม่ได้ลงเรียนคอร์สนี้', 404, 'COURSE_NOT_ENROLLED');
+    }
+
+    const enrollmentStatus = normalizeEnrollmentStatus(existingEnrollment.status);
+    if (enrollmentStatus !== 'ACTIVE') {
+      const refundRequest = await coursesRepository.getRefundRequestByEnrollmentId(Number(existingEnrollment.id));
+      throw buildEnrollmentInactiveError(enrollmentStatus, normalizeRefundRequestStatus(refundRequest?.status));
+    }
+
+    const certificate = await coursesRepository.findCertificate(userId, courseId);
+    if (Boolean(existingEnrollment.isCompleted) || certificate) {
+      throw buildAppError('คอร์สที่เรียนจบแล้วหรือมีใบประกาศแล้วไม่สามารถยกเลิกได้', 409, 'COURSE_CANCEL_NOT_ALLOWED');
+    }
+
+    const reason = data.reason?.trim() || null;
+    const isPaidCourse = Number(course.price ?? 0) > 0;
+
+    return await db.transaction(async (tx) => {
+      await coursesRepository.lockEnrollment(userId, courseId, tx);
+
+      const lockedEnrollment = await coursesRepository.findEnrollmentByStatus(userId, courseId, ['ACTIVE'], tx);
+      if (!lockedEnrollment) {
+        const inactiveEnrollment = await coursesRepository.findEnrollment(userId, courseId, tx);
+        if (!inactiveEnrollment) {
+          throw buildAppError('ยังไม่ได้ลงเรียนคอร์สนี้', 404, 'COURSE_NOT_ENROLLED');
+        }
+
+        const refundRequest = await coursesRepository.getRefundRequestByEnrollmentId(Number(inactiveEnrollment.id), tx);
+        throw buildEnrollmentInactiveError(
+          normalizeEnrollmentStatus(inactiveEnrollment.status),
+          normalizeRefundRequestStatus(refundRequest?.status),
+        );
+      }
+
+      const latestPaidOrderItem = lockedEnrollment.sourceOrderItemId
+        ? { orderItemId: Number(lockedEnrollment.sourceOrderItemId) }
+        : await coursesRepository.findLatestPaidOrderItemForUserCourse(userId, courseId, tx);
+
+      if (lockedEnrollment.sourceOrderItemId == null && latestPaidOrderItem?.orderItemId) {
+        await coursesRepository.attachEnrollmentSourceOrderItem(Number(lockedEnrollment.id), Number(latestPaidOrderItem.orderItemId), tx);
+      }
+
+      if (!isPaidCourse) {
+        const cancelledEnrollment = await coursesRepository.updateEnrollmentStatus(
+          userId,
+          courseId,
+          'CANCELLED',
+          {
+            cancelledAt: new Date(),
+            cancelReason: reason,
+            sourceOrderItemId: latestPaidOrderItem?.orderItemId ?? lockedEnrollment.sourceOrderItemId ?? null,
+            lastAccessedAt: new Date(),
+          },
+          tx,
+        );
+
+        return {
+          enrollmentId: Number(cancelledEnrollment?.id ?? lockedEnrollment.id),
+          courseId,
+          enrollmentStatus: 'CANCELLED',
+          cancelledAt: cancelledEnrollment?.cancelledAt ?? new Date().toISOString(),
+          cancelReason: reason,
+          refundRequest: null,
+        };
+      }
+
+      const refundPendingEnrollment = await coursesRepository.updateEnrollmentStatus(
+        userId,
+        courseId,
+        'REFUND_PENDING',
+        {
+          cancelledAt: new Date(),
+          cancelReason: reason,
+          sourceOrderItemId: latestPaidOrderItem?.orderItemId ?? lockedEnrollment.sourceOrderItemId ?? null,
+          lastAccessedAt: new Date(),
+        },
+        tx,
+      );
+
+      const refundRequest = await coursesRepository.upsertCourseRefundRequest({
+        userId,
+        courseId,
+        enrollmentId: Number(refundPendingEnrollment?.id ?? lockedEnrollment.id),
+        orderItemId: latestPaidOrderItem?.orderItemId ?? lockedEnrollment.sourceOrderItemId ?? null,
+        status: 'PENDING',
+        reason,
+        requestedAt: new Date(),
+      }, tx);
+
+      return {
+        enrollmentId: Number(refundPendingEnrollment?.id ?? lockedEnrollment.id),
+        courseId,
+        enrollmentStatus: 'REFUND_PENDING',
+        cancelledAt: refundPendingEnrollment?.cancelledAt ?? new Date().toISOString(),
+        cancelReason: reason,
+        refundRequest: normalizeRefundRequestSummary(refundRequest),
+      };
+    });
+  },
+
+  async listRefundRequests() {
+    const refundRequests = await coursesRepository.listRefundRequests();
+    return refundRequests.map((request: any) => ({
+      id: Number(request.id),
+      status: normalizeRefundRequestStatus(request.status) ?? 'PENDING',
+      reason: request.reason ?? null,
+      adminNote: request.adminNote ?? null,
+      requestedAt: request.requestedAt ?? null,
+      resolvedAt: request.resolvedAt ?? null,
+      resolvedByAdminId: request.resolvedByAdminId ?? null,
+      enrollmentId: Number(request.enrollmentId),
+      courseId: Number(request.courseId),
+      courseTitle: request.courseTitle ?? '',
+      coursePrice: Number(request.coursePrice ?? 0),
+      orderItemId: request.orderItemId ?? null,
+      orderId: request.orderId ?? null,
+      user: {
+        id: Number(request.userId),
+        fullName: request.userName ?? '',
+        email: request.userEmail ?? '',
+      },
+    }));
+  },
+
+  async resolveRefundRequest(
+    refundRequestId: number,
+    status: 'APPROVED' | 'REJECTED',
+    data: ResolveRefundRequestInput,
+    adminId?: string,
+  ) {
+    const refundRequest = await coursesRepository.getRefundRequestById(refundRequestId);
+    if (!refundRequest) {
+      throw buildAppError('ไม่พบคำขอคืนเงินนี้', 404, 'REFUND_REQUEST_NOT_FOUND');
+    }
+
+    if (normalizeRefundRequestStatus(refundRequest.status) !== 'PENDING') {
+      throw buildAppError('คำขอคืนเงินนี้ถูกดำเนินการไปแล้ว', 409, 'REFUND_REQUEST_ALREADY_RESOLVED');
+    }
+
+    const resolvedRefundRequest = await db.transaction(async (tx) => {
+      const updatedRefundRequest = await coursesRepository.resolveRefundRequest(
+        refundRequestId,
+        status,
+        {
+          adminNote: data.adminNote?.trim() || null,
+          resolvedAt: new Date(),
+          resolvedByAdminId: adminId ?? null,
+        },
+        tx,
+      );
+
+      if (!updatedRefundRequest) {
+        throw buildAppError('ไม่พบคำขอคืนเงินนี้', 404, 'REFUND_REQUEST_NOT_FOUND');
+      }
+
+      if (status === 'APPROVED' && updatedRefundRequest.orderItemId) {
+        const paidOrderItem = await coursesRepository.getOrderItemById(Number(updatedRefundRequest.orderItemId), tx);
+        const orderId = Number(paidOrderItem?.orderId ?? 0);
+        if (orderId > 0) {
+          const [orderItemsCount, approvedRefundCount] = await Promise.all([
+            coursesRepository.countOrderItemsForOrder(orderId, tx),
+            coursesRepository.countApprovedRefundRequestsForOrder(orderId, tx),
+          ]);
+
+          if (orderItemsCount > 0 && approvedRefundCount >= orderItemsCount) {
+            await coursesRepository.updateOrderStatus(orderId, 'REFUNDED', tx);
+          }
+        }
+      }
+
+      return updatedRefundRequest;
+    });
+
+    return normalizeRefundRequestSummary(resolvedRefundRequest);
   },
 };

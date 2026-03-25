@@ -1,5 +1,6 @@
 import { db } from '../../db/index.js';
 import {
+  users,
   categories,
   subcategories,
   courses,
@@ -7,6 +8,8 @@ import {
   lessonDocuments,
   lessonQuizzes,
   lessonQuizQuestions,
+  userLessonQuizAttempts,
+  userLessonQuizAnswers,
   courseRelatedCourses,
   videos,
   videoQuestions,
@@ -19,8 +22,9 @@ import {
   userLessonProgress,
   userVideoAnswers,
   courseReviews,
-  users,
+  courseRefundRequests,
   orderItems,
+  orders,
   cartItems,
 } from '../../db/schema/index.js';
 import { eq, and, desc, asc, count, inArray, sql, or, ilike, isNotNull, avg } from 'drizzle-orm';
@@ -73,6 +77,15 @@ type CourseDeletionBlockers = {
   certificatesCount: number;
   orderItemsCount: number;
 };
+type CourseAdminAction = 'delete' | 'archive';
+type CourseDeletionMetadata = {
+  deletionBlockers: CourseDeletionBlockers;
+  canHardDelete: boolean;
+  recommendedAdminAction: CourseAdminAction;
+};
+type EnrollmentStatus = 'ACTIVE' | 'CANCELLED' | 'REFUND_PENDING';
+type EnrolledCourseStatusFilter = 'active' | 'cancelled' | 'all';
+type RefundRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 type CreateCourseRepositoryInput = CreateCourseInput & {
   publishedAt?: CourseWriteTimestampValue;
 };
@@ -93,6 +106,19 @@ function createEmptyVideoUsage(): VideoUsageSummary {
     previewCourseCount: 0,
     lessonUsageCount: 0,
     totalUsageCount: 0,
+  };
+}
+
+function buildCourseDeletionMetadata(blockers: CourseDeletionBlockers): CourseDeletionMetadata {
+  const canHardDelete =
+    blockers.enrollmentsCount === 0
+    && blockers.certificatesCount === 0
+    && blockers.orderItemsCount === 0;
+
+  return {
+    deletionBlockers: blockers,
+    canHardDelete,
+    recommendedAdminAction: canHardDelete ? 'delete' : 'archive',
   };
 }
 
@@ -376,7 +402,7 @@ export const coursesRepository = {
       limit: filters?.limit,
     });
 
-    return await this.attachCourseSummaries(courseRows);
+    return await this.attachCourseSummaries(courseRows, undefined, { includeDeletionMetadata: true });
   },
 
   async listPublishedCourses(filters?: { categoryId?: number; search?: string; limit?: number }) {
@@ -439,7 +465,7 @@ export const coursesRepository = {
       return null;
     }
 
-    return await this.attachCourseDetails(course);
+    return await this.attachCourseDetails(course, undefined, { includeDeletionMetadata: true });
   },
 
   async getPublishedCourseById(id: number) {
@@ -511,6 +537,7 @@ export const coursesRepository = {
     const [result] = await db.insert(courses).values({
       ...data,
       price: data.price ? data.price.toString() : null,
+      cpeCredits: data.cpeCredits != null ? data.cpeCredits.toString() : '0',
       enrollmentDeadline: toTimestampValue(data.enrollmentDeadline) ?? null,
       courseEndAt: toTimestampValue(data.courseEndAt) ?? null,
       publishedAt: toTimestampValue(data.publishedAt) ?? null,
@@ -524,6 +551,7 @@ export const coursesRepository = {
       .set({
         ...data,
         price: data.price ? data.price.toString() : undefined,
+        cpeCredits: data.cpeCredits != null ? data.cpeCredits.toString() : undefined,
         enrollmentDeadline: toTimestampValue(data.enrollmentDeadline),
         courseEndAt: toTimestampValue(data.courseEndAt),
         publishedAt: toTimestampValue(data.publishedAt),
@@ -1151,6 +1179,18 @@ export const coursesRepository = {
     });
   },
 
+  async listUserLessonQuizAttempts(userId: number, lessonQuizIds: number[], tx?: DbConnection) {
+    if (lessonQuizIds.length === 0) {
+      return [];
+    }
+
+    const conn = tx ?? db;
+    return await conn.query.userLessonQuizAttempts.findMany({
+      where: and(eq(userLessonQuizAttempts.userId, userId), inArray(userLessonQuizAttempts.lessonQuizId, lessonQuizIds)),
+      orderBy: [desc(userLessonQuizAttempts.finishedAt), desc(userLessonQuizAttempts.id)],
+    });
+  },
+
   async upsertLessonProgress(userId: number, lessonId: number, data: UpdateLessonProgressInput & { isCompleted: boolean }, tx?: DbConnection) {
     const conn = tx ?? db;
     const [progress] = await conn
@@ -1199,6 +1239,60 @@ export const coursesRepository = {
     return progress;
   },
 
+  async createLessonQuizAttempt(
+    userId: number,
+    lessonQuizId: number,
+    data: {
+      scoreObtained: number;
+      totalScore: number;
+      scorePercent: number;
+      isPassed: boolean;
+      startedAt?: Date;
+      finishedAt?: Date;
+    },
+    tx?: DbConnection,
+  ) {
+    const conn = tx ?? db;
+    const [attempt] = await conn.insert(userLessonQuizAttempts).values({
+      userId,
+      lessonQuizId,
+      scoreObtained: data.scoreObtained.toFixed(2),
+      totalScore: data.totalScore.toFixed(2),
+      scorePercent: data.scorePercent.toFixed(2),
+      isPassed: data.isPassed,
+      startedAt: data.startedAt ?? new Date(),
+      finishedAt: data.finishedAt ?? new Date(),
+    }).returning();
+
+    return attempt;
+  },
+
+  async createLessonQuizAnswers(
+    attemptId: number,
+    answers: Array<{
+      lessonQuizQuestionId: number;
+      answerGiven: string;
+      isCorrect: boolean;
+      pointsEarned: number;
+    }>,
+    tx?: DbConnection,
+  ) {
+    if (answers.length === 0) {
+      return [];
+    }
+
+    const conn = tx ?? db;
+    return await conn.insert(userLessonQuizAnswers).values(
+      answers.map((answer) => ({
+        attemptId,
+        lessonQuizQuestionId: answer.lessonQuizQuestionId,
+        answerGiven: answer.answerGiven,
+        isCorrect: answer.isCorrect,
+        pointsEarned: answer.pointsEarned.toFixed(2),
+      })),
+    ).returning();
+  },
+
   async upsertVideoQuestionAnswer(userId: number, videoQuestionId: number, data: CreateVideoQuestionAnswerInput, tx?: DbConnection) {
     const conn = tx ?? db;
     const [answer] = await conn
@@ -1240,6 +1334,47 @@ export const coursesRepository = {
     });
   },
 
+  async findEnrollmentByStatus(
+    userId: number,
+    courseId: number,
+    statuses?: EnrollmentStatus[],
+    tx?: DbConnection,
+  ) {
+    const conn = tx ?? db;
+    const conditions = [
+      eq(enrollments.userId, userId),
+      eq(enrollments.courseId, courseId),
+    ];
+
+    if (statuses && statuses.length > 0) {
+      conditions.push(inArray(enrollments.status, statuses));
+    }
+
+    return await conn.query.enrollments.findFirst({
+      where: and(...conditions),
+    });
+  },
+
+  async findCertificate(userId: number, courseId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    return await conn.query.certificates.findFirst({
+      where: and(eq(certificates.userId, userId), eq(certificates.courseId, courseId)),
+    });
+  },
+
+  async attachEnrollmentSourceOrderItem(enrollmentId: number, sourceOrderItemId: number | null, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [enrollment] = await conn
+      .update(enrollments)
+      .set({
+        sourceOrderItemId,
+      })
+      .where(eq(enrollments.id, enrollmentId))
+      .returning();
+
+    return enrollment;
+  },
+
   async lockEnrollment(userId: number, courseId: number, tx: DbConnection) {
     await tx.execute(sql`
       select ${enrollments.id}
@@ -1248,6 +1383,237 @@ export const coursesRepository = {
         and ${enrollments.courseId} = ${courseId}
       for update
     `);
+  },
+
+  async updateEnrollmentStatus(
+    userId: number,
+    courseId: number,
+    status: EnrollmentStatus,
+    options?: {
+      cancelledAt?: Date | null;
+      cancelReason?: string | null;
+      sourceOrderItemId?: number | null;
+      lastAccessedAt?: Date | null;
+    },
+    tx?: DbConnection,
+  ) {
+    const conn = tx ?? db;
+    const [enrollment] = await conn
+      .update(enrollments)
+      .set({
+        status,
+        cancelledAt: options?.cancelledAt,
+        cancelReason: options?.cancelReason ?? null,
+        ...(options?.sourceOrderItemId !== undefined ? { sourceOrderItemId: options.sourceOrderItemId } : {}),
+        ...(options?.lastAccessedAt !== undefined ? { lastAccessedAt: options.lastAccessedAt } : {}),
+      })
+      .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)))
+      .returning();
+
+    return enrollment;
+  },
+
+  async reactivateEnrollment(userId: number, courseId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [enrollment] = await conn
+      .update(enrollments)
+      .set({
+        status: 'ACTIVE',
+        cancelledAt: null,
+        cancelReason: null,
+        lastAccessedAt: new Date(),
+      })
+      .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)))
+      .returning();
+
+    return enrollment;
+  },
+
+  async findLatestPaidOrderItemForUserCourse(userId: number, courseId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [row] = await conn
+      .select({
+        orderItemId: orderItems.id,
+        orderId: orderItems.orderId,
+        priceAtPurchase: orderItems.priceAtPurchase,
+        orderStatus: orders.status,
+        createdAt: orders.createdAt,
+      })
+      .from(orderItems)
+      .innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(and(
+        eq(orderItems.courseId, courseId),
+        eq(orders.userId, userId),
+        inArray(orders.status, ['PAID', 'REFUNDED']),
+      ))
+      .orderBy(desc(orders.createdAt), desc(orderItems.id))
+      .limit(1);
+
+    return row ?? null;
+  },
+
+  async getOrderItemById(id: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [row] = await conn
+      .select({
+        id: orderItems.id,
+        orderId: orderItems.orderId,
+        courseId: orderItems.courseId,
+        priceAtPurchase: orderItems.priceAtPurchase,
+      })
+      .from(orderItems)
+      .where(eq(orderItems.id, id))
+      .limit(1);
+
+    return row ?? null;
+  },
+
+  async upsertCourseRefundRequest(
+    data: {
+      userId: number;
+      courseId: number;
+      enrollmentId: number;
+      orderItemId?: number | null;
+      status?: RefundRequestStatus;
+      reason?: string | null;
+      adminNote?: string | null;
+      requestedAt?: Date;
+      resolvedAt?: Date | null;
+      resolvedByAdminId?: string | null;
+    },
+    tx?: DbConnection,
+  ) {
+    const conn = tx ?? db;
+    const [refundRequest] = await conn
+      .insert(courseRefundRequests)
+      .values({
+        userId: data.userId,
+        courseId: data.courseId,
+        enrollmentId: data.enrollmentId,
+        orderItemId: data.orderItemId ?? null,
+        status: data.status ?? 'PENDING',
+        reason: data.reason ?? null,
+        adminNote: data.adminNote ?? null,
+        requestedAt: data.requestedAt ?? new Date(),
+        resolvedAt: data.resolvedAt ?? null,
+        resolvedByAdminId: data.resolvedByAdminId ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [courseRefundRequests.enrollmentId],
+        set: {
+          orderItemId: data.orderItemId ?? null,
+          status: data.status ?? 'PENDING',
+          reason: data.reason ?? null,
+          adminNote: data.adminNote ?? null,
+          requestedAt: data.requestedAt ?? new Date(),
+          resolvedAt: data.resolvedAt ?? null,
+          resolvedByAdminId: data.resolvedByAdminId ?? null,
+        },
+      })
+      .returning();
+
+    return refundRequest;
+  },
+
+  async getRefundRequestByEnrollmentId(enrollmentId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    return await conn.query.courseRefundRequests.findFirst({
+      where: eq(courseRefundRequests.enrollmentId, enrollmentId),
+    });
+  },
+
+  async getRefundRequestById(id: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    return await conn.query.courseRefundRequests.findFirst({
+      where: eq(courseRefundRequests.id, id),
+    });
+  },
+
+  async resolveRefundRequest(
+    id: number,
+    status: RefundRequestStatus,
+    options?: {
+      adminNote?: string | null;
+      resolvedAt?: Date | null;
+      resolvedByAdminId?: string | null;
+    },
+    tx?: DbConnection,
+  ) {
+    const conn = tx ?? db;
+    const [refundRequest] = await conn
+      .update(courseRefundRequests)
+      .set({
+        status,
+        adminNote: options?.adminNote ?? null,
+        resolvedAt: options?.resolvedAt ?? new Date(),
+        resolvedByAdminId: options?.resolvedByAdminId ?? null,
+      })
+      .where(eq(courseRefundRequests.id, id))
+      .returning();
+
+    return refundRequest;
+  },
+
+  async listRefundRequests() {
+    return await db
+      .select({
+        id: courseRefundRequests.id,
+        status: courseRefundRequests.status,
+        reason: courseRefundRequests.reason,
+        adminNote: courseRefundRequests.adminNote,
+        requestedAt: courseRefundRequests.requestedAt,
+        resolvedAt: courseRefundRequests.resolvedAt,
+        resolvedByAdminId: courseRefundRequests.resolvedByAdminId,
+        enrollmentId: courseRefundRequests.enrollmentId,
+        courseId: courseRefundRequests.courseId,
+        orderItemId: courseRefundRequests.orderItemId,
+        userId: courseRefundRequests.userId,
+        userName: users.fullName,
+        userEmail: users.email,
+        courseTitle: courses.title,
+        coursePrice: courses.price,
+        orderId: orderItems.orderId,
+      })
+      .from(courseRefundRequests)
+      .innerJoin(users, eq(courseRefundRequests.userId, users.id))
+      .innerJoin(courses, eq(courseRefundRequests.courseId, courses.id))
+      .leftJoin(orderItems, eq(courseRefundRequests.orderItemId, orderItems.id))
+      .orderBy(desc(courseRefundRequests.requestedAt), desc(courseRefundRequests.id));
+  },
+
+  async countOrderItemsForOrder(orderId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [result] = await conn
+      .select({ count: count(orderItems.id) })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId));
+
+    return Number(result?.count ?? 0);
+  },
+
+  async countApprovedRefundRequestsForOrder(orderId: number, tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [result] = await conn
+      .select({ count: count(courseRefundRequests.id) })
+      .from(courseRefundRequests)
+      .innerJoin(orderItems, eq(courseRefundRequests.orderItemId, orderItems.id))
+      .where(and(
+        eq(orderItems.orderId, orderId),
+        eq(courseRefundRequests.status, 'APPROVED'),
+      ));
+
+    return Number(result?.count ?? 0);
+  },
+
+  async updateOrderStatus(orderId: number, status: 'PENDING' | 'PAID' | 'CANCELLED' | 'REFUNDED', tx?: DbConnection) {
+    const conn = tx ?? db;
+    const [order] = await conn
+      .update(orders)
+      .set({ status })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    return order;
   },
 
   async touchEnrollment(userId: number, courseId: number, lessonId?: number | null, tx?: DbConnection) {
@@ -1291,18 +1657,30 @@ export const coursesRepository = {
     return enrollment;
   },
 
-  async createEnrollment(userId: number, courseId: number) {
+  async createEnrollment(userId: number, courseId: number, sourceOrderItemId?: number | null) {
     const [enrollment] = await db.insert(enrollments).values({
       userId,
       courseId,
+      sourceOrderItemId: sourceOrderItemId ?? null,
     }).returning();
 
     return enrollment;
   },
 
-  async listEnrolledCourses(userId: number) {
+  async listEnrolledCourses(userId: number, statusFilter: EnrolledCourseStatusFilter = 'active') {
+    const statusMap: Record<EnrolledCourseStatusFilter, EnrollmentStatus[] | undefined> = {
+      active: ['ACTIVE'],
+      cancelled: ['CANCELLED', 'REFUND_PENDING'],
+      all: undefined,
+    };
+    const statuses = statusMap[statusFilter];
+    const enrollmentConditions = [eq(enrollments.userId, userId)];
+    if (statuses && statuses.length > 0) {
+      enrollmentConditions.push(inArray(enrollments.status, statuses));
+    }
+
     const enrollmentRows = await db.query.enrollments.findMany({
-      where: eq(enrollments.userId, userId),
+      where: and(...enrollmentConditions),
       with: {
         course: {
           with: {
@@ -1317,6 +1695,7 @@ export const coursesRepository = {
     const courseIds = enrollmentRows
       .map((row) => row.courseId)
       .filter((courseId): courseId is number => typeof courseId === 'number');
+    const enrollmentIds = enrollmentRows.map((row) => row.id);
 
     if (courseIds.length === 0) {
       return [];
@@ -1334,9 +1713,16 @@ export const coursesRepository = {
     const certificateRows = await db.query.certificates.findMany({
       where: and(eq(certificates.userId, userId), inArray(certificates.courseId, courseIds)),
     });
+    const refundRequestRows = enrollmentIds.length > 0
+      ? await db.query.courseRefundRequests.findMany({
+          where: inArray(courseRefundRequests.enrollmentId, enrollmentIds),
+          orderBy: [desc(courseRefundRequests.requestedAt), desc(courseRefundRequests.id)],
+        })
+      : [];
 
     const lessonCountMap = new Map(lessonSummary.map((row) => [row.courseId, row.count]));
     const certificateMap = new Map(certificateRows.map((row) => [row.courseId, row]));
+    const refundRequestMap = new Map(refundRequestRows.map((row) => [row.enrollmentId, row]));
 
     return enrollmentRows
       .filter((row) => Boolean(row.course) && LEARNER_ACCESSIBLE_COURSE_STATUSES.includes(row.course.status as typeof LEARNER_ACCESSIBLE_COURSE_STATUSES[number]))
@@ -1349,6 +1735,7 @@ export const coursesRepository = {
             }
           : null,
         certificate: certificateMap.get(row.courseId) ?? null,
+        refundRequest: refundRequestMap.get(row.id) ?? null,
       }));
   },
 
@@ -1357,7 +1744,7 @@ export const coursesRepository = {
     const [result] = await conn
       .select({ count: count(enrollments.id) })
       .from(enrollments)
-      .where(eq(enrollments.courseId, courseId));
+      .where(and(eq(enrollments.courseId, courseId), eq(enrollments.status, 'ACTIVE')));
 
     return result?.count ?? 0;
   },
@@ -1456,7 +1843,63 @@ export const coursesRepository = {
     return completedCount >= lessonIds.length;
   },
 
-  async attachCourseSummaries<T extends Array<any>>(courseRows: T, tx?: DbConnection): Promise<T> {
+  async buildCourseDeletionMetadataMap(courseIds: number[], tx?: DbConnection) {
+    if (courseIds.length === 0) {
+      return new Map<number, CourseDeletionMetadata>();
+    }
+
+    const conn = tx ?? db;
+    const [enrollmentSummary, certificateSummary, orderItemSummary] = await Promise.all([
+      conn
+        .select({
+          courseId: enrollments.courseId,
+          count: count(enrollments.id),
+        })
+        .from(enrollments)
+        .where(inArray(enrollments.courseId, courseIds))
+        .groupBy(enrollments.courseId),
+      conn
+        .select({
+          courseId: certificates.courseId,
+          count: count(certificates.id),
+        })
+        .from(certificates)
+        .where(inArray(certificates.courseId, courseIds))
+        .groupBy(certificates.courseId),
+      conn
+        .select({
+          courseId: orderItems.courseId,
+          count: count(orderItems.id),
+        })
+        .from(orderItems)
+        .where(inArray(orderItems.courseId, courseIds))
+        .groupBy(orderItems.courseId),
+    ]);
+
+    const enrollmentMap = new Map<number, number>(enrollmentSummary.map((row: any) => [row.courseId, Number(row.count ?? 0)]));
+    const certificateMap = new Map<number, number>(certificateSummary.map((row: any) => [row.courseId, Number(row.count ?? 0)]));
+    const orderItemMap = new Map<number, number>(orderItemSummary.map((row: any) => [row.courseId, Number(row.count ?? 0)]));
+    const metadataMap = new Map<number, CourseDeletionMetadata>();
+
+    for (const courseId of courseIds) {
+      metadataMap.set(
+        courseId,
+        buildCourseDeletionMetadata({
+          enrollmentsCount: enrollmentMap.get(courseId) ?? 0,
+          certificatesCount: certificateMap.get(courseId) ?? 0,
+          orderItemsCount: orderItemMap.get(courseId) ?? 0,
+        })
+      );
+    }
+
+    return metadataMap;
+  },
+
+  async attachCourseSummaries<T extends Array<any>>(
+    courseRows: T,
+    tx?: DbConnection,
+    options?: { includeDeletionMetadata?: boolean },
+  ): Promise<T> {
     if (courseRows.length === 0) {
       return courseRows;
     }
@@ -1491,30 +1934,57 @@ export const coursesRepository = {
       .from(courseReviews)
       .where(inArray(courseReviews.courseId, courseIds))
       .groupBy(courseReviews.courseId);
+    const durationSummary = await conn
+      .select({
+        courseId: lessons.courseId,
+        totalDurationSeconds: sql<number>`coalesce(sum(${videos.duration}), 0)`,
+      })
+      .from(lessons)
+      .leftJoin(videos, eq(lessons.videoId, videos.id))
+      .where(inArray(lessons.courseId, courseIds))
+      .groupBy(lessons.courseId);
 
     const enrollmentMap = new Map(enrollmentSummary.map((row: any) => [row.courseId, row.count]));
     const lessonMap = new Map(lessonSummary.map((row: any) => [row.courseId, row.count]));
-    const reviewMap = new Map(reviewSummary.map((row: any) => [row.courseId, { reviewsCount: Number(row.reviewsCount ?? 0), averageRating: Number(row.averageRating ?? 0) }]));
+    const reviewMap = new Map(reviewSummary.map((row: any) => [row.courseId, {
+      reviewsCount: Number(row.reviewsCount ?? 0),
+      averageRating: Number(row.averageRating ?? 0),
+    }]));
+    const durationMap = new Map(durationSummary.map((row: any) => [row.courseId, Number(row.totalDurationSeconds ?? 0)]));
+    const deletionMetadataMap = options?.includeDeletionMetadata
+      ? await this.buildCourseDeletionMetadataMap(courseIds, tx)
+      : new Map<number, CourseDeletionMetadata>();
 
     return courseRows.map((course) => {
       const reviewStats = reviewMap.get(course.id);
       const rating = reviewStats && reviewStats.reviewsCount > 0
         ? Number(reviewStats.averageRating.toFixed(1))
         : 0;
+
       return {
         ...course,
         enrolledCount: enrollmentMap.get(course.id) ?? 0,
         enrollmentsCount: enrollmentMap.get(course.id) ?? 0,
         lessonsCount: lessonMap.get(course.id) ?? 0,
-        rating,
         reviewsCount: reviewStats?.reviewsCount ?? 0,
+        rating,
+        totalDurationSeconds: Number(durationMap.get(course.id) ?? 0),
+        durationMinutes: Math.round(Number(durationMap.get(course.id) ?? 0) / 60),
+        ...(deletionMetadataMap.get(course.id) ?? {}),
       };
     }) as T;
   },
 
-  async attachCourseDetails<T extends Record<string, any>>(course: T, tx?: DbConnection): Promise<T> {
+  async attachCourseDetails<T extends Record<string, any>>(
+    course: T,
+    tx?: DbConnection,
+    options?: { includeDeletionMetadata?: boolean },
+  ): Promise<T> {
     const conn = tx ?? db;
     const enrolledCount = await this.countEnrollments(course.id, tx);
+    const deletionMetadata = options?.includeDeletionMetadata
+      ? buildCourseDeletionMetadata(await this.getCourseDeletionBlockers(course.id))
+      : null;
 
     const relatedLinks = await conn.query.courseRelatedCourses.findMany({
       where: eq(courseRelatedCourses.courseId, course.id),
@@ -1547,6 +2017,28 @@ export const coursesRepository = {
       });
     }
 
+    const relatedDurationMap = new Map<number, number>();
+
+    if (relatedCourseIds.length > 0) {
+      const relatedDurationSummary = await conn
+        .select({
+          courseId: lessons.courseId,
+          totalDurationSeconds: sql<number>`coalesce(sum(${videos.duration}), 0)`,
+        })
+        .from(lessons)
+        .leftJoin(videos, eq(lessons.videoId, videos.id))
+        .where(inArray(lessons.courseId, relatedCourseIds))
+        .groupBy(lessons.courseId);
+
+      relatedDurationSummary.forEach((item: any) => {
+        relatedDurationMap.set(item.courseId, Number(item.totalDurationSeconds ?? 0));
+      });
+    }
+
+    const totalDurationSeconds = Array.isArray(course.lessons)
+      ? course.lessons.reduce((sum: number, lesson: any) => sum + Number(lesson.video?.duration ?? 0), 0)
+      : 0;
+
     const relatedCourses = relatedLinks
       .map((link: any) => link.relatedCourse)
       .filter(Boolean)
@@ -1554,6 +2046,8 @@ export const coursesRepository = {
         ...relatedCourse,
         enrolledCount: relatedEnrollmentMap.get(relatedCourse.id) ?? 0,
         enrollmentsCount: relatedEnrollmentMap.get(relatedCourse.id) ?? 0,
+        totalDurationSeconds: Number(relatedDurationMap.get(relatedCourse.id) ?? 0),
+        durationMinutes: Math.round(Number(relatedDurationMap.get(relatedCourse.id) ?? 0) / 60),
       }));
 
     const finalExam = await this.getExamByCourseId(course.id);
@@ -1570,6 +2064,8 @@ export const coursesRepository = {
       relatedCourses,
       relatedCourseIds: relatedCourses.map((relatedCourse: any) => relatedCourse.id),
       lessonsCount: Array.isArray(course.lessons) ? course.lessons.length : 0,
+      totalDurationSeconds,
+      durationMinutes: Math.round(totalDurationSeconds / 60),
       lessons: Array.isArray(course.lessons)
         ? course.lessons.map((lesson: any) => ({
             ...lesson,
@@ -1582,6 +2078,7 @@ export const coursesRepository = {
       exam: finalExam,
       reviewsCount: reviewStats.reviewsCount,
       rating: Number.isFinite(averageRating) ? averageRating : 0,
+      ...(deletionMetadata ?? {}),
     } as T;
   },
 };

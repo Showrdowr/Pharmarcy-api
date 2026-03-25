@@ -35,5 +35,6 @@ export function errorHandler(
     code: (error as FastifyError & { code?: string }).code,
     error: error.name || 'Internal Server Error',
     message: error.message || 'An unexpected error occurred',
+    details: (error as FastifyError & { details?: unknown }).details,
   });
 }

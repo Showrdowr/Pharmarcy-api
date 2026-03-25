@@ -96,6 +96,13 @@ describe('coursesService.deleteCourse', () => {
     await expect(coursesService.deleteCourse(46)).rejects.toMatchObject({
       statusCode: 409,
       code: 'COURSE_DELETE_CONFLICT',
+      details: {
+        enrollmentsCount: 1,
+        certificatesCount: 0,
+        orderItemsCount: 2,
+        canHardDelete: false,
+        recommendedAdminAction: 'archive',
+      },
     });
     expect(repositoryMocks.deleteCourse).not.toHaveBeenCalled();
   });

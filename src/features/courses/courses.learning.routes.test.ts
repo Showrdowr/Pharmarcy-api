@@ -11,8 +11,10 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 
 const serviceMocks = vi.hoisted(() => ({
   getCourseLearning: vi.fn(),
+  getLessonQuizRuntime: vi.fn(),
   addVideoQuestionsBulk: vi.fn(),
   answerVideoQuestion: vi.fn(),
+  submitLessonQuizAttempt: vi.fn(),
   updateLessonProgress: vi.fn(),
   completeLesson: vi.fn(),
 }));
@@ -41,8 +43,10 @@ async function createTestApp() {
 describe('courses learning routes', () => {
   beforeEach(() => {
     serviceMocks.getCourseLearning.mockReset();
+    serviceMocks.getLessonQuizRuntime.mockReset();
     serviceMocks.addVideoQuestionsBulk.mockReset();
     serviceMocks.answerVideoQuestion.mockReset();
+    serviceMocks.submitLessonQuizAttempt.mockReset();
     serviceMocks.updateLessonProgress.mockReset();
     serviceMocks.completeLesson.mockReset();
   });
@@ -115,7 +119,11 @@ describe('courses learning routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(serviceMocks.getCourseLearning).toHaveBeenCalledWith(12, 99);
+    expect(serviceMocks.getCourseLearning).toHaveBeenCalledWith(
+      12,
+      99,
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
 
     const body = response.json();
     expect(body.data.lessons[0].video).toMatchObject({
@@ -246,13 +254,129 @@ describe('courses learning routes', () => {
     });
 
     expect(response.statusCode).toBe(201);
-    expect(serviceMocks.answerVideoQuestion).toHaveBeenCalledWith(77, 99, {
-      answerGiven: 'option-a',
-    });
+    expect(serviceMocks.answerVideoQuestion).toHaveBeenCalledWith(
+      77,
+      99,
+      {
+        answerGiven: 'option-a',
+      },
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
     expect(response.json().data).toMatchObject({
       videoQuestionId: 77,
       answerGiven: 'option-a',
       answered: true,
+    });
+
+    await app.close();
+  });
+
+  it('returns lesson quiz runtime for the authenticated learner', async () => {
+    const app = await createTestApp();
+    const token = app.jwt.sign({ id: 99, role: 'general' });
+
+    serviceMocks.getLessonQuizRuntime.mockResolvedValue({
+      id: 44,
+      lessonId: 1,
+      passingScorePercent: 70,
+      maxAttempts: 3,
+      attemptsUsed: 1,
+      remainingAttempts: 2,
+      latestAttempt: {
+        id: 8,
+        attemptNumber: 1,
+        scorePercent: 80,
+        isPassed: true,
+      },
+      questions: [
+        {
+          id: 401,
+          questionText: 'คำถามท้ายบท',
+          questionType: 'MULTIPLE_CHOICE',
+          options: [{ id: 'option-a', text: 'คำตอบ A' }],
+          scoreWeight: 1,
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/lessons/1/quiz-runtime',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(serviceMocks.getLessonQuizRuntime).toHaveBeenCalledWith(
+      1,
+      99,
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
+    expect(response.json().data).toMatchObject({
+      lessonId: 1,
+      attemptsUsed: 1,
+      questions: [
+        expect.objectContaining({
+          id: 401,
+          questionType: 'MULTIPLE_CHOICE',
+        }),
+      ],
+    });
+
+    await app.close();
+  });
+
+  it('submits a lesson quiz attempt with the authenticated learner id', async () => {
+    const app = await createTestApp();
+    const token = app.jwt.sign({ id: 99, role: 'general' });
+
+    serviceMocks.submitLessonQuizAttempt.mockResolvedValue({
+      attemptId: 12,
+      lessonId: 1,
+      quizId: 44,
+      attemptNumber: 2,
+      attemptsUsed: 2,
+      scorePercent: 90,
+      isPassed: true,
+      answers: [
+        {
+          questionId: 401,
+          answerGiven: 'option-a',
+          isCorrect: true,
+          pointsEarned: 1,
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/lessons/1/quiz-attempts',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      payload: {
+        answers: [
+          { questionId: 401, answerGiven: 'option-a' },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(serviceMocks.submitLessonQuizAttempt).toHaveBeenCalledWith(
+      1,
+      99,
+      {
+        answers: [
+          { questionId: 401, answerGiven: 'option-a' },
+        ],
+      },
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
+    expect(response.json().data).toMatchObject({
+      lessonId: 1,
+      quizId: 44,
+      isPassed: true,
     });
 
     await app.close();
@@ -361,9 +485,14 @@ describe('courses learning routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(serviceMocks.updateLessonProgress).toHaveBeenCalledWith(1, 99, {
-      lastWatchedSeconds: 180,
-    });
+    expect(serviceMocks.updateLessonProgress).toHaveBeenCalledWith(
+      1,
+      99,
+      {
+        lastWatchedSeconds: 180,
+      },
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
     expect(response.json().data).toEqual({
       lastWatchedSeconds: 180,
       isCompleted: false,
@@ -424,7 +553,12 @@ describe('courses learning routes', () => {
     });
 
     expect(response.statusCode).toBe(409);
-    expect(serviceMocks.completeLesson).toHaveBeenCalledWith(12, 1, 99);
+    expect(serviceMocks.completeLesson).toHaveBeenCalledWith(
+      12,
+      1,
+      99,
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
     expect(response.json()).toMatchObject({
       statusCode: 409,
       code: 'INTERACTIVE_INCOMPLETE',

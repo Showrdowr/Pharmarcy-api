@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const MAX_LESSON_DOCUMENT_BYTES = 20 * 1024 * 1024;
+
 // Category schemas
 export const createCategorySchema = z.object({
   name: z.string().min(1).max(255),
@@ -34,6 +36,7 @@ export const createCourseSchema = z.object({
   cpeCredits: z.number().min(0).optional().nullable(),
   conferenceCode: z.string().max(255).optional().nullable(),
   language: z.string().max(50).optional().nullable(),
+  audience: z.enum(['all', 'general', 'pharmacist']).optional().default('all'),
   skillLevel: z.string().max(50).optional().nullable().default('ALL'),
   hasCertificate: z.boolean().optional().nullable().default(false),
   maxStudents: z.number().int().positive().optional().nullable(),
@@ -55,6 +58,10 @@ export const courseListQuerySchema = z.object({
   categoryId: z.string().optional(),
   search: z.string().optional(),
   limit: z.string().optional(),
+});
+
+export const enrolledCourseListQuerySchema = z.object({
+  status: z.enum(['active', 'cancelled', 'all']).optional().default('active'),
 });
 
 export const courseIdParamsSchema = z.object({
@@ -105,7 +112,7 @@ export const updateLessonSchema = createLessonSchema.partial();
 export const createLessonDocumentSchema = z.object({
   fileName: z.string().min(1).max(255),
   mimeType: z.string().min(1).max(255),
-  sizeBytes: z.number().int().positive(),
+  sizeBytes: z.number().int().positive().max(MAX_LESSON_DOCUMENT_BYTES, 'ไฟล์เอกสารต้องไม่เกิน 20MB ต่อไฟล์'),
   fileUrl: z.string().min(1),
 });
 
@@ -174,6 +181,17 @@ export const createLessonQuizQuestionSchema = z.object({
 
 export const updateLessonQuizQuestionSchema = createLessonQuizQuestionSchema.partial();
 
+export const createLessonQuizAttemptSchema = z.object({
+  answers: z.array(z.object({
+    questionId: z.number().int().positive(),
+    answerGiven: z.string().trim().min(1),
+  })).min(1),
+});
+
+export const cancelCourseSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
 export const createExamSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().max(255).optional().nullable(),
@@ -237,6 +255,8 @@ export type CreateLessonQuizInput = z.infer<typeof createLessonQuizSchema>;
 export type UpdateLessonQuizInput = z.infer<typeof updateLessonQuizSchema>;
 export type CreateLessonQuizQuestionInput = z.infer<typeof createLessonQuizQuestionSchema>;
 export type UpdateLessonQuizQuestionInput = z.infer<typeof updateLessonQuizQuestionSchema>;
+export type CreateLessonQuizAttemptInput = z.infer<typeof createLessonQuizAttemptSchema>;
+export type CancelCourseInput = z.infer<typeof cancelCourseSchema>;
 export type CreateExamInput = z.infer<typeof createExamSchema>;
 export type UpdateExamInput = z.infer<typeof updateExamSchema>;
 export type CreateExamQuestionInput = z.infer<typeof createExamQuestionSchema>;
@@ -271,3 +291,14 @@ export type CompleteVideoUploadInput = z.infer<typeof completeVideoUploadSchema>
 export type ResolveVimeoVideoInput = z.infer<typeof resolveVimeoVideoSchema>;
 export type ImportVimeoVideoInput = z.infer<typeof importVimeoVideoSchema>;
 export type VideoListQueryInput = z.infer<typeof videoListQuerySchema>;
+export type EnrolledCourseListQueryInput = z.infer<typeof enrolledCourseListQuerySchema>;
+
+export const refundRequestIdParamsSchema = z.object({
+  id: z.string().transform((val) => parseInt(val, 10)),
+});
+
+export const resolveRefundRequestSchema = z.object({
+  adminNote: z.string().trim().max(1000).optional(),
+});
+
+export type ResolveRefundRequestInput = z.infer<typeof resolveRefundRequestSchema>;

@@ -20,6 +20,8 @@ import type {
   UpdateLessonQuizInput,
   CreateLessonQuizQuestionInput,
   UpdateLessonQuizQuestionInput,
+  CreateLessonQuizAttemptInput,
+  CancelCourseInput,
   CreateExamInput,
   UpdateExamInput,
   CreateExamQuestionInput,
@@ -31,7 +33,10 @@ import type {
   ReviewListQueryInput,
   CreateCourseReviewInput,
   VideoListQueryInput,
+  EnrolledCourseListQueryInput,
+  ResolveRefundRequestInput,
 } from './courses.schema.js';
+import type { CourseAccessUser } from './course-audience.js';
 
 function getAdminId(request: FastifyRequest) {
   return (request.user as any)?.id as string | undefined;
@@ -39,6 +44,24 @@ function getAdminId(request: FastifyRequest) {
 
 function getUserId(request: FastifyRequest) {
   return Number((request.user as any)?.id);
+}
+
+function getRequestUser(request: FastifyRequest): CourseAccessUser {
+  return (request.user as any) as CourseAccessUser;
+}
+
+async function getOptionalRequestUser(request: FastifyRequest): Promise<CourseAccessUser> {
+  const authHeader = request.headers.authorization;
+  if (!authHeader || !authHeader.trim()) {
+    return undefined;
+  }
+
+  try {
+    await request.jwtVerify();
+    return getRequestUser(request);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseCourseListFilters(query: { categoryId?: string; search?: string; limit?: string }) {
@@ -153,12 +176,15 @@ export const coursesController = {
     request: FastifyRequest<{ Querystring: { categoryId?: string; search?: string; limit?: string } }>,
     reply: FastifyReply
   ) {
-    const courses = await coursesService.listPublishedCourses(parseCourseListFilters(request.query));
+    const courses = await coursesService.listPublishedCourses(
+      parseCourseListFilters(request.query),
+      await getOptionalRequestUser(request),
+    );
     return reply.send({ data: courses });
   },
 
   async getPublicCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const course = await coursesService.getPublishedCourse(request.params.id);
+    const course = await coursesService.getPublishedCourse(request.params.id, await getOptionalRequestUser(request));
     if (!course) {
       return reply.status(404).send({ message: 'Course not found' });
     }
@@ -183,8 +209,22 @@ export const coursesController = {
   },
 
   async listEnrolledCourses(request: FastifyRequest, reply: FastifyReply) {
-    const courses = await coursesService.listEnrolledCourses(getUserId(request));
+    const query = (request as FastifyRequest<{ Querystring: EnrolledCourseListQueryInput }>).query;
+    const courses = await coursesService.listEnrolledCourses(getUserId(request), getRequestUser(request), query?.status);
     return reply.send({ data: courses });
+  },
+
+  async cancelCourse(
+    request: FastifyRequest<{ Params: { id: number }; Body: CancelCourseInput }>,
+    reply: FastifyReply,
+  ) {
+    const result = await coursesService.cancelCourse(
+      request.params.id,
+      getUserId(request),
+      request.body,
+      getRequestUser(request),
+    );
+    return reply.send({ data: result });
   },
 
   async getCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
@@ -196,12 +236,12 @@ export const coursesController = {
   },
 
   async getCourseLearning(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const course = await coursesService.getCourseLearning(request.params.id, getUserId(request));
+    const course = await coursesService.getCourseLearning(request.params.id, getUserId(request), getRequestUser(request));
     return reply.send({ data: course });
   },
 
   async getCourseProgress(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const progress = await coursesService.getCourseProgress(request.params.id, getUserId(request));
+    const progress = await coursesService.getCourseProgress(request.params.id, getUserId(request), getRequestUser(request));
     return reply.send({ data: progress });
   },
 
@@ -317,15 +357,33 @@ export const coursesController = {
     request: FastifyRequest<{ Params: { id: number }; Body: CreateVideoQuestionAnswerInput }>,
     reply: FastifyReply
   ) {
-    const answer = await coursesService.answerVideoQuestion(request.params.id, getUserId(request), request.body);
+    const answer = await coursesService.answerVideoQuestion(request.params.id, getUserId(request), request.body, getRequestUser(request));
     return reply.status(201).send({ data: answer });
+  },
+
+  async getLessonQuizRuntime(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    const quiz = await coursesService.getLessonQuizRuntime(request.params.id, getUserId(request), getRequestUser(request));
+    return reply.send({ data: quiz });
+  },
+
+  async submitLessonQuizAttempt(
+    request: FastifyRequest<{ Params: { id: number }; Body: CreateLessonQuizAttemptInput }>,
+    reply: FastifyReply
+  ) {
+    const attempt = await coursesService.submitLessonQuizAttempt(
+      request.params.id,
+      getUserId(request),
+      request.body,
+      getRequestUser(request),
+    );
+    return reply.status(201).send({ data: attempt });
   },
 
   async updateLessonProgress(
     request: FastifyRequest<{ Params: { id: number }; Body: UpdateLessonProgressInput }>,
     reply: FastifyReply
   ) {
-    const progress = await coursesService.updateLessonProgress(request.params.id, getUserId(request), request.body);
+    const progress = await coursesService.updateLessonProgress(request.params.id, getUserId(request), request.body, getRequestUser(request));
     return reply.send({ data: progress });
   },
 
@@ -333,7 +391,12 @@ export const coursesController = {
     request: FastifyRequest<{ Params: { courseId: number; lessonId: number } }>,
     reply: FastifyReply
   ) {
-    const progress = await coursesService.completeLesson(request.params.courseId, request.params.lessonId, getUserId(request));
+    const progress = await coursesService.completeLesson(
+      request.params.courseId,
+      request.params.lessonId,
+      getUserId(request),
+      getRequestUser(request),
+    );
     return reply.send({ data: progress });
   },
 
@@ -482,7 +545,28 @@ export const coursesController = {
   },
 
   async enrollCourse(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
-    const enrollment = await coursesService.enrollCourse(request.params.id, getUserId(request));
+    const enrollment = await coursesService.enrollCourse(request.params.id, getUserId(request), getRequestUser(request));
     return reply.status(201).send({ data: enrollment });
+  },
+
+  async listRefundRequests(request: FastifyRequest, reply: FastifyReply) {
+    const refundRequests = await coursesService.listRefundRequests();
+    return reply.send({ data: refundRequests });
+  },
+
+  async approveRefundRequest(
+    request: FastifyRequest<{ Params: { id: number }; Body: ResolveRefundRequestInput }>,
+    reply: FastifyReply,
+  ) {
+    const refundRequest = await coursesService.resolveRefundRequest(request.params.id, 'APPROVED', request.body, getAdminId(request));
+    return reply.send({ data: refundRequest });
+  },
+
+  async rejectRefundRequest(
+    request: FastifyRequest<{ Params: { id: number }; Body: ResolveRefundRequestInput }>,
+    reply: FastifyReply,
+  ) {
+    const refundRequest = await coursesService.resolveRefundRequest(request.params.id, 'REJECTED', request.body, getAdminId(request));
+    return reply.send({ data: refundRequest });
   },
 };

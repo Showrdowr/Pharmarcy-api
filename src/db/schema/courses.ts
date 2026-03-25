@@ -1,8 +1,10 @@
 import { pgTable, serial, varchar, text, integer, numeric, timestamp, boolean, pgEnum, jsonb, customType, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import { users } from './users.js';
 
 // Enums
 export const courseStatusEnum = pgEnum('course_status', ['DRAFT', 'PUBLISHED', 'ARCHIVED']);
+export const courseAudienceEnum = pgEnum('course_audience', ['all', 'general', 'pharmacist']);
 export const videoProviderEnum = pgEnum('video_provider', ['YOUTUBE', 'VIMEO', 'CLOUDFLARE', 'S3']);
 export const videoStatusEnum = pgEnum('video_status', ['PROCESSING', 'READY', 'FAILED']);
 export const questionTypeEnum = pgEnum('question_type', ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'SHORT_ANSWER']);
@@ -52,9 +54,10 @@ export const courses = pgTable('courses', {
   thumbnail: text('thumbnail'), // DB-backed raw base64 payload for course thumbnails in this phase.
   thumbnailMimeType: varchar('thumbnail_mime_type', { length: 255 }),
   previewVideoId: integer('preview_video_id').references(() => videos.id),
-  cpeCredits: integer('cpe_credits').default(0),
+  cpeCredits: numeric('cpe_credits', { precision: 5, scale: 2 }).default('0'),
   conferenceCode: varchar('conference_code', { length: 255 }),
   language: varchar('language', { length: 50 }),
+  audience: courseAudienceEnum('audience').notNull().default('all'),
   skillLevel: varchar('skill_level', { length: 50 }).default('ALL'),
   hasCertificate: boolean('has_certificate').default(false),
   maxStudents: integer('max_students'),
@@ -102,6 +105,27 @@ export const lessonQuizQuestions = pgTable('lesson_quiz_questions', {
   options: jsonb('options'),
   correctAnswer: text('correct_answer'),
   scoreWeight: integer('score_weight').notNull().default(1),
+});
+
+export const userLessonQuizAttempts = pgTable('user_lesson_quiz_attempts', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  lessonQuizId: integer('lesson_quiz_id').notNull().references(() => lessonQuizzes.id, { onDelete: 'cascade' }),
+  scoreObtained: numeric('score_obtained', { precision: 10, scale: 2 }).notNull().default('0'),
+  totalScore: numeric('total_score', { precision: 10, scale: 2 }).notNull().default('0'),
+  scorePercent: numeric('score_percent', { precision: 5, scale: 2 }).notNull().default('0'),
+  isPassed: boolean('is_passed').notNull().default(false),
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }).defaultNow(),
+});
+
+export const userLessonQuizAnswers = pgTable('user_lesson_quiz_answers', {
+  id: serial('id').primaryKey(),
+  attemptId: integer('attempt_id').notNull().references(() => userLessonQuizAttempts.id, { onDelete: 'cascade' }),
+  lessonQuizQuestionId: integer('lesson_quiz_question_id').notNull().references(() => lessonQuizQuestions.id, { onDelete: 'cascade' }),
+  answerGiven: text('answer_given'),
+  isCorrect: boolean('is_correct').notNull().default(false),
+  pointsEarned: numeric('points_earned', { precision: 10, scale: 2 }).notNull().default('0'),
 });
 
 export const courseRelatedCourses = pgTable('course_related_courses', {
@@ -202,12 +226,37 @@ export const lessonQuizzesRelations = relations(lessonQuizzes, ({ one, many }) =
     references: [lessons.id],
   }),
   questions: many(lessonQuizQuestions),
+  userAttempts: many(userLessonQuizAttempts),
 }));
 
-export const lessonQuizQuestionsRelations = relations(lessonQuizQuestions, ({ one }) => ({
+export const lessonQuizQuestionsRelations = relations(lessonQuizQuestions, ({ one, many }) => ({
   lessonQuiz: one(lessonQuizzes, {
     fields: [lessonQuizQuestions.lessonQuizId],
     references: [lessonQuizzes.id],
+  }),
+  userAnswers: many(userLessonQuizAnswers),
+}));
+
+export const userLessonQuizAttemptsRelations = relations(userLessonQuizAttempts, ({ one, many }) => ({
+  user: one(users, {
+    fields: [userLessonQuizAttempts.userId],
+    references: [users.id],
+  }),
+  lessonQuiz: one(lessonQuizzes, {
+    fields: [userLessonQuizAttempts.lessonQuizId],
+    references: [lessonQuizzes.id],
+  }),
+  answers: many(userLessonQuizAnswers),
+}));
+
+export const userLessonQuizAnswersRelations = relations(userLessonQuizAnswers, ({ one }) => ({
+  attempt: one(userLessonQuizAttempts, {
+    fields: [userLessonQuizAnswers.attemptId],
+    references: [userLessonQuizAttempts.id],
+  }),
+  question: one(lessonQuizQuestions, {
+    fields: [userLessonQuizAnswers.lessonQuizQuestionId],
+    references: [lessonQuizQuestions.id],
   }),
 }));
 

@@ -13,7 +13,9 @@ import {
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    bodyLimit: 8 * 1024 * 1024,
+    // Lesson documents are currently sent as data URLs in JSON, so the request body
+    // must be larger than the raw per-file limit to account for base64 expansion.
+    bodyLimit: 32 * 1024 * 1024,
     logger: {
       level: env.LOG_LEVEL,
       transport:

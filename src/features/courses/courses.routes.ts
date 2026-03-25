@@ -11,6 +11,7 @@ import {
   updateCourseSchema,
   categoryParamsSchema,
   courseListQuerySchema,
+  enrolledCourseListQuerySchema,
   courseParamsSchema,
   courseIdParamsSchema,
   createLessonSchema,
@@ -31,6 +32,8 @@ import {
   createLessonQuizQuestionSchema,
   lessonQuizQuestionIdParamsSchema,
   updateLessonQuizQuestionSchema,
+  createLessonQuizAttemptSchema,
+  cancelCourseSchema,
   createExamSchema,
   updateExamSchema,
   examIdParamsSchema,
@@ -45,6 +48,8 @@ import {
   importVimeoVideoSchema,
   reviewListQuerySchema,
   createCourseReviewSchema,
+  refundRequestIdParamsSchema,
+  resolveRefundRequestSchema,
 } from './courses.schema.js';
 
 export async function coursesRoutes(app: FastifyInstance) {
@@ -143,6 +148,7 @@ export async function coursesRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Courses'],
         summary: 'List enrolled courses for current user',
+        querystring: enrolledCourseListQuerySchema,
       },
       handler: coursesController.listEnrolledCourses,
     });
@@ -202,6 +208,16 @@ export async function coursesRoutes(app: FastifyInstance) {
       handler: coursesController.enrollCourse,
     });
 
+    typedApp.post('/courses/:id/cancel', {
+      schema: {
+        tags: ['Courses'],
+        summary: 'Cancel enrolled course for current user',
+        params: courseParamsSchema,
+        body: cancelCourseSchema,
+      },
+      handler: coursesController.cancelCourse,
+    });
+
     typedApp.post('/courses/:courseId/lessons/:lessonId/complete', {
       schema: {
         tags: ['Courses - Learning'],
@@ -232,6 +248,25 @@ export async function coursesRoutes(app: FastifyInstance) {
         body: createVideoQuestionAnswerSchema,
       },
       handler: coursesController.answerVideoQuestion,
+    });
+
+    typedApp.get('/lessons/:id/quiz-runtime', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Get lesson quiz details for learner',
+        params: lessonIdParamsSchema,
+      },
+      handler: coursesController.getLessonQuizRuntime,
+    });
+
+    typedApp.post('/lessons/:id/quiz-attempts', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Submit lesson quiz answers',
+        params: lessonIdParamsSchema,
+        body: createLessonQuizAttemptSchema,
+      },
+      handler: coursesController.submitLessonQuizAttempt,
     });
 
     // Admin only Category routes
@@ -618,6 +653,34 @@ export async function coursesRoutes(app: FastifyInstance) {
           params: videoIdParamsSchema,
         },
         handler: coursesController.syncVideoStatus,
+      });
+
+      typedAdminApp.get('/admin/refund-requests', {
+        schema: {
+          tags: ['Admin - Refund Requests'],
+          summary: 'List learner refund requests (Admin only)',
+        },
+        handler: coursesController.listRefundRequests,
+      });
+
+      typedAdminApp.post('/admin/refund-requests/:id/approve', {
+        schema: {
+          tags: ['Admin - Refund Requests'],
+          summary: 'Approve learner refund request (Admin only)',
+          params: refundRequestIdParamsSchema,
+          body: resolveRefundRequestSchema,
+        },
+        handler: coursesController.approveRefundRequest,
+      });
+
+      typedAdminApp.post('/admin/refund-requests/:id/reject', {
+        schema: {
+          tags: ['Admin - Refund Requests'],
+          summary: 'Reject learner refund request (Admin only)',
+          params: refundRequestIdParamsSchema,
+          body: resolveRefundRequestSchema,
+        },
+        handler: coursesController.rejectRefundRequest,
       });
     });
   });

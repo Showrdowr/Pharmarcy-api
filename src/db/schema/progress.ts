@@ -1,21 +1,45 @@
-import { pgTable, serial, varchar, integer, numeric, timestamp, boolean, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, integer, numeric, timestamp, boolean, text, uniqueIndex, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { users } from './users.js';
 import { courses, lessons, videoQuestions } from './courses.js';
+import { orderItems } from './orders.js';
+
+export const enrollmentStatusEnum = pgEnum('enrollment_status', ['ACTIVE', 'CANCELLED', 'REFUND_PENDING']);
+export const courseRefundRequestStatusEnum = pgEnum('course_refund_request_status', ['PENDING', 'APPROVED', 'REJECTED']);
 
 // Enrollments table
 export const enrollments = pgTable('enrollments', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
   courseId: integer('course_id').notNull().references(() => courses.id),
+  status: enrollmentStatusEnum('status').notNull().default('ACTIVE'),
   progressPercent: numeric('progress_percent', { precision: 5, scale: 2 }).default('0.00'),
   watchPercent: numeric('watch_percent', { precision: 5, scale: 2 }).default('0.00'),
   isCompleted: boolean('is_completed').default(false),
   enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow(),
   lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
   lastAccessedLessonId: integer('last_accessed_lesson_id').references(() => lessons.id, { onDelete: 'set null' }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelReason: text('cancel_reason'),
+  sourceOrderItemId: integer('source_order_item_id').references(() => orderItems.id, { onDelete: 'set null' }),
 }, (table) => ({
   enrollmentsUserCourseUnique: uniqueIndex('enrollments_user_course_unique_idx').on(table.userId, table.courseId),
+}));
+
+export const courseRefundRequests = pgTable('course_refund_requests', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  courseId: integer('course_id').notNull().references(() => courses.id, { onDelete: 'cascade' }),
+  enrollmentId: integer('enrollment_id').notNull().references(() => enrollments.id, { onDelete: 'cascade' }),
+  orderItemId: integer('order_item_id').references(() => orderItems.id, { onDelete: 'set null' }),
+  status: courseRefundRequestStatusEnum('status').notNull().default('PENDING'),
+  reason: text('reason'),
+  adminNote: text('admin_note'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedByAdminId: varchar('resolved_by_admin_id', { length: 255 }),
+}, (table) => ({
+  refundRequestEnrollmentUnique: uniqueIndex('course_refund_requests_enrollment_unique_idx').on(table.enrollmentId),
 }));
 
 // Certificates table
@@ -80,6 +104,25 @@ export const enrollmentsRelations = relations(enrollments, ({ one }) => ({
   lastAccessedLesson: one(lessons, {
     fields: [enrollments.lastAccessedLessonId],
     references: [lessons.id],
+  }),
+}));
+
+export const courseRefundRequestsRelations = relations(courseRefundRequests, ({ one }) => ({
+  user: one(users, {
+    fields: [courseRefundRequests.userId],
+    references: [users.id],
+  }),
+  course: one(courses, {
+    fields: [courseRefundRequests.courseId],
+    references: [courses.id],
+  }),
+  enrollment: one(enrollments, {
+    fields: [courseRefundRequests.enrollmentId],
+    references: [enrollments.id],
+  }),
+  orderItem: one(orderItems, {
+    fields: [courseRefundRequests.orderItemId],
+    references: [orderItems.id],
   }),
 }));
 
