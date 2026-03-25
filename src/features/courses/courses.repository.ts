@@ -83,6 +83,10 @@ type CourseDeletionMetadata = {
   canHardDelete: boolean;
   recommendedAdminAction: CourseAdminAction;
 };
+type CourseReviewStatsSummary = {
+  reviewsCount: number;
+  averageRating: number;
+};
 type EnrollmentStatus = 'ACTIVE' | 'CANCELLED' | 'REFUND_PENDING';
 type EnrolledCourseStatusFilter = 'active' | 'cancelled' | 'all';
 type RefundRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -1763,7 +1767,7 @@ export const coursesRepository = {
       .from(courseReviews)
       .leftJoin(users, eq(users.id, courseReviews.userId))
       .where(eq(courseReviews.courseId, courseId))
-      .orderBy([desc(courseReviews.createdAt), desc(courseReviews.id)])
+      .orderBy(desc(courseReviews.createdAt), desc(courseReviews.id))
       .limit(limit);
   },
 
@@ -1946,7 +1950,7 @@ export const coursesRepository = {
 
     const enrollmentMap = new Map(enrollmentSummary.map((row: any) => [row.courseId, row.count]));
     const lessonMap = new Map(lessonSummary.map((row: any) => [row.courseId, row.count]));
-    const reviewMap = new Map(reviewSummary.map((row: any) => [row.courseId, {
+    const reviewMap = new Map<number, CourseReviewStatsSummary>(reviewSummary.map((row: any) => [row.courseId, {
       reviewsCount: Number(row.reviewsCount ?? 0),
       averageRating: Number(row.averageRating ?? 0),
     }]));

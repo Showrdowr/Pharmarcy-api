@@ -81,8 +81,8 @@ export const courseReviews = pgTable('course_reviews', {
   courseId: integer('course_id').notNull().references(() => courses.id, { onDelete: 'cascade' }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   rating: integer('rating').notNull(),
-  title: varchar('title', { length: 255, notNull: false }),
-  body: text('body', { notNull: false }),
+  title: varchar('title', { length: 255 }),
+  body: text('body'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
