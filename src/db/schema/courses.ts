@@ -75,6 +75,7 @@ export const lessons = pgTable('lessons', {
   courseId: integer('course_id').notNull().references(() => courses.id),
   videoId: integer('video_id').notNull().references(() => videos.id),
   title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
   sequenceOrder: integer('sequence_order').notNull(),
 });
 

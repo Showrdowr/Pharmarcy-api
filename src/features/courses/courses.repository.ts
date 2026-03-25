@@ -781,6 +781,7 @@ export const coursesRepository = {
     const [lesson] = await db.insert(lessons).values({
       courseId,
       title: data.title,
+      description: data.description ?? null,
       videoId: data.videoId,
       sequenceOrder: data.sequenceOrder,
     }).returning();
@@ -808,6 +809,12 @@ export const coursesRepository = {
     }).returning();
 
     return document;
+  },
+
+  async getLessonDocumentById(id: number) {
+    return await db.query.lessonDocuments.findFirst({
+      where: eq(lessonDocuments.id, id),
+    });
   },
 
   async deleteLessonDocument(id: number) {

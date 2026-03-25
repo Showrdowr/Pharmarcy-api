@@ -420,6 +420,15 @@ export async function coursesRoutes(app: FastifyInstance) {
         handler: coursesController.addLessonDocument,
       });
 
+      typedAdminApp.get('/lesson-documents/:id', {
+        schema: {
+          tags: ['Admin - Lesson Documents'],
+          summary: 'Get lesson document by ID (Admin only)',
+          params: lessonDocumentIdParamsSchema,
+        },
+        handler: coursesController.getLessonDocument,
+      });
+
       typedAdminApp.delete('/lesson-documents/:id', {
         schema: {
           tags: ['Admin - Lesson Documents'],

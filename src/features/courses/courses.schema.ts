@@ -103,6 +103,7 @@ export const videoListQuerySchema = z.object({
 
 export const createLessonSchema = z.object({
   title: z.string().min(1).max(255),
+  description: z.string().optional().nullable(),
   videoId: z.number().int().positive(),
   sequenceOrder: z.number().int().positive(),
 });

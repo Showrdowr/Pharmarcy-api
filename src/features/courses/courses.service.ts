@@ -258,6 +258,19 @@ function normalizeInteractiveQuestion(question: any, options?: { includeCorrectA
   };
 }
 
+function normalizeLessonDocumentForResponse(document: any, options?: { includeFileUrl?: boolean }) {
+  const includeFileUrl = options?.includeFileUrl ?? false;
+  return {
+    id: Number(document.id),
+    lessonId: Number(document.lessonId),
+    fileName: document.fileName,
+    mimeType: document.mimeType,
+    sizeBytes: Number(document.sizeBytes ?? 0),
+    createdAt: document.createdAt ?? null,
+    ...(includeFileUrl ? { fileUrl: document.fileUrl } : {}),
+  };
+}
+
 function normalizeLessonForResponse(lesson: any) {
   const lessonQuiz = lesson.lessonQuiz ?? (Array.isArray(lesson.lessonQuizzes) ? lesson.lessonQuizzes[0] ?? null : null);
   return {
@@ -268,7 +281,9 @@ function normalizeLessonForResponse(lesson: any) {
         ? lesson.videoQuestions.map((question: any) => normalizeInteractiveQuestion(question))
         : []
     ),
-    documents: Array.isArray(lesson.documents) ? lesson.documents : [],
+    documents: Array.isArray(lesson.documents)
+      ? lesson.documents.map((document: any) => normalizeLessonDocumentForResponse(document))
+      : [],
     documentsCount: Array.isArray(lesson.documents) ? lesson.documents.length : 0,
     lessonQuiz,
     hasQuiz: Boolean(lessonQuiz),
@@ -616,11 +631,20 @@ function normalizeInteractiveQuestionPayload(data: CreateVideoQuestionInput | Up
   }
 
   if (questionType === 'TRUE_FALSE') {
+    const normalizedCorrectAnswer =
+      typeof data.correctAnswer === 'string'
+        ? resolveInteractiveChoiceAnswer(buildTrueFalseOptions(), data.correctAnswer)
+        : null;
+
+    if (data.correctAnswer !== undefined && data.correctAnswer !== null && !normalizedCorrectAnswer) {
+      throw buildAppError('กรุณาระบุคำตอบสำหรับคำถามจริง/เท็จให้ถูกต้อง', 400);
+    }
+
     return {
       ...data,
       questionText,
       options: buildTrueFalseOptions(),
-      correctAnswer: null,
+      correctAnswer: normalizedCorrectAnswer,
     };
   }
 
@@ -1435,7 +1459,17 @@ export const coursesService = {
       throw buildAppError('Lesson not found', 404);
     }
 
-    return await coursesRepository.createLessonDocument(lessonId, data);
+    const document = await coursesRepository.createLessonDocument(lessonId, data);
+    return normalizeLessonDocumentForResponse(document, { includeFileUrl: true });
+  },
+
+  async getLessonDocument(id: number) {
+    const document = await coursesRepository.getLessonDocumentById(id);
+    if (!document) {
+      return null;
+    }
+
+    return normalizeLessonDocumentForResponse(document, { includeFileUrl: true });
   },
 
   async deleteLessonDocument(id: number) {

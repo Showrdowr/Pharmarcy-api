@@ -313,6 +313,14 @@ export const coursesController = {
     return reply.status(201).send({ data: document });
   },
 
+  async getLessonDocument(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    const document = await coursesService.getLessonDocument(request.params.id);
+    if (!document) {
+      return reply.status(404).send({ message: 'Lesson document not found' });
+    }
+    return reply.send({ data: document });
+  },
+
   async deleteLessonDocument(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
     const document = await coursesService.deleteLessonDocument(request.params.id);
     if (!document) {
