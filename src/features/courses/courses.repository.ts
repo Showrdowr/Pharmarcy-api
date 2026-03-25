@@ -1482,15 +1482,34 @@ export const coursesRepository = {
       .where(inArray(lessons.courseId, courseIds))
       .groupBy(lessons.courseId);
 
+    const reviewSummary = await conn
+      .select({
+        courseId: courseReviews.courseId,
+        reviewsCount: count(courseReviews.id),
+        averageRating: avg(courseReviews.rating),
+      })
+      .from(courseReviews)
+      .where(inArray(courseReviews.courseId, courseIds))
+      .groupBy(courseReviews.courseId);
+
     const enrollmentMap = new Map(enrollmentSummary.map((row: any) => [row.courseId, row.count]));
     const lessonMap = new Map(lessonSummary.map((row: any) => [row.courseId, row.count]));
+    const reviewMap = new Map(reviewSummary.map((row: any) => [row.courseId, { reviewsCount: Number(row.reviewsCount ?? 0), averageRating: Number(row.averageRating ?? 0) }]));
 
-    return courseRows.map((course) => ({
-      ...course,
-      enrolledCount: enrollmentMap.get(course.id) ?? 0,
-      enrollmentsCount: enrollmentMap.get(course.id) ?? 0,
-      lessonsCount: lessonMap.get(course.id) ?? 0,
-    })) as T;
+    return courseRows.map((course) => {
+      const reviewStats = reviewMap.get(course.id);
+      const rating = reviewStats && reviewStats.reviewsCount > 0
+        ? Number(reviewStats.averageRating.toFixed(1))
+        : 0;
+      return {
+        ...course,
+        enrolledCount: enrollmentMap.get(course.id) ?? 0,
+        enrollmentsCount: enrollmentMap.get(course.id) ?? 0,
+        lessonsCount: lessonMap.get(course.id) ?? 0,
+        rating,
+        reviewsCount: reviewStats?.reviewsCount ?? 0,
+      };
+    }) as T;
   },
 
   async attachCourseDetails<T extends Record<string, any>>(course: T, tx?: DbConnection): Promise<T> {
