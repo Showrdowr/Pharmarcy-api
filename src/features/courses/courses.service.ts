@@ -143,6 +143,48 @@ function shouldMarkVideoFailed(error: unknown) {
     || candidate.statusCode === 404;
 }
 
+function isVimeoPrivacyMutationPermissionError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const candidate = error as { code?: string; statusCode?: number };
+  return candidate.statusCode === 403
+    || candidate.code === 'VIMEO_PRIVACY_UPDATE_FAILED'
+    || candidate.code === 'VIMEO_EMBED_DOMAIN_FAILED';
+}
+
+function canUseExistingVimeoPlaybackWithoutMutation(video: {
+  playbackUrl?: string | null;
+  privacyView?: string | null;
+  privacyEmbed?: string | null;
+}) {
+  const hasPlaybackUrl = typeof video.playbackUrl === 'string' && video.playbackUrl.trim().length > 0;
+  const privacyEmbed = String(video.privacyEmbed ?? '').toLowerCase();
+  const privacyView = String(video.privacyView ?? '').toLowerCase();
+
+  return hasPlaybackUrl
+    && privacyEmbed === 'public'
+    && (privacyView === 'anybody' || privacyView === 'unlisted');
+}
+
+async function ensureManagedVimeoPlaybackOrReuseExisting(video: {
+  resourceId: string;
+  playbackUrl?: string | null;
+  privacyView?: string | null;
+  privacyEmbed?: string | null;
+}) {
+  try {
+    await vimeoService.ensureEmbedDomains(video.resourceId);
+  } catch (error) {
+    if (isVimeoPrivacyMutationPermissionError(error) && canUseExistingVimeoPlaybackWithoutMutation(video)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 function parseDateValue(value?: string | Date | null) {
   if (!value) {
     return null;
@@ -368,6 +410,24 @@ function normalizeVideoForResponse(video: any) {
       lessonUsageCount,
       totalUsageCount,
     },
+  };
+}
+
+function normalizeLearningLessonVideo(video: any) {
+  if (!video) {
+    return null;
+  }
+
+  return {
+    id: Number(video.id),
+    provider: String(video.provider ?? 'VIMEO'),
+    resourceId: String(video.resourceId ?? ''),
+    duration: Number(video.duration ?? 0),
+    name: video.name ?? null,
+    status: (video.status ?? 'PROCESSING') as VideoStatus,
+    playbackUrl: typeof video.playbackUrl === 'string' && video.playbackUrl.trim().length > 0
+      ? video.playbackUrl
+      : null,
   };
 }
 
@@ -703,7 +763,9 @@ function assertViewerCanAccessCourseOrThrow(course: { audience?: string | null }
 }
 
 async function getLearnerAccessibleCourseOrThrow(courseId: number, userId: number, viewer?: CourseAccessUser, tx?: any) {
-  const course = await coursesRepository.getCourseForLearner(courseId, tx);
+  const course = await coursesRepository.getCourseForLearner(courseId, tx, {
+    includeExtendedDetails: false,
+  });
   if (!course) {
     throw buildAppError('Course not found', 404);
   }
@@ -1135,17 +1197,7 @@ export const coursesService = {
         title: lesson.title,
         sequenceOrder: lesson.sequenceOrder,
         status: isCompleted ? 'completed' : isUnlocked ? 'available' : 'locked',
-        video: lesson.video
-          ? {
-              id: lesson.video.id,
-              provider: lesson.video.provider,
-              resourceId: lesson.video.resourceId,
-              duration: Number(lesson.video.duration ?? 0),
-              name: lesson.video.name,
-              status: lesson.video.status ?? 'PROCESSING',
-              playbackUrl: lesson.video.playbackUrl ?? null,
-            }
-          : null,
+        video: normalizeLearningLessonVideo(lesson.video),
         documents: Array.isArray(lesson.documents)
           ? lesson.documents.map((document: any) => ({
               id: Number(document.id),
@@ -1223,6 +1275,39 @@ export const coursesService = {
       progressPercent: completionPercent,
       startedAt: snapshot.enrollment.enrolledAt,
       lastAccessedAt: snapshot.enrollment.lastAccessedAt ?? snapshot.enrollment.enrolledAt,
+    };
+  },
+
+  async syncLearningLessonVideo(courseId: number, lessonId: number, userId: number, viewer?: CourseAccessUser) {
+    const snapshot = await buildLearningSnapshot(courseId, userId, viewer);
+    const { lesson } = assertLessonAccessibleForLearner(snapshot, lessonId);
+
+    if (!lesson.video) {
+      return {
+        lessonId,
+        video: null,
+      };
+    }
+
+    if (lesson.video.provider !== 'VIMEO') {
+      return {
+        lessonId,
+        video: normalizeLearningLessonVideo(lesson.video),
+      };
+    }
+
+    const videoId = Number(lesson.video.id);
+    if (!Number.isInteger(videoId) || videoId <= 0) {
+      return {
+        lessonId,
+        video: null,
+      };
+    }
+
+    const syncedVideo = await this.syncVideoStatus(videoId);
+    return {
+      lessonId,
+      video: normalizeLearningLessonVideo(syncedVideo),
     };
   },
 
@@ -2101,7 +2186,7 @@ export const coursesService = {
       const status = deriveVideoStatus(resolved.uploadStatus, resolved.transcodeStatus, resolved.duration, resolved.playbackUrl);
 
       if (status !== 'FAILED') {
-        await vimeoService.ensureEmbedDomains(resolved.resourceId);
+        await ensureManagedVimeoPlaybackOrReuseExisting(resolved);
       }
 
       const video = await coursesRepository.createVideo({
@@ -2156,7 +2241,7 @@ export const coursesService = {
       const status = deriveVideoStatus(metadata.uploadStatus, metadata.transcodeStatus, metadata.duration, metadata.playbackUrl);
 
       if (status !== 'FAILED') {
-        await vimeoService.ensureEmbedDomains(video.resourceId);
+        await ensureManagedVimeoPlaybackOrReuseExisting(metadata);
       }
 
       await coursesRepository.updateVideoStatus(id, status, {

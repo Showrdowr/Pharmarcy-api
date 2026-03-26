@@ -230,6 +230,18 @@ export async function coursesRoutes(app: FastifyInstance) {
       handler: coursesController.completeLesson,
     });
 
+    typedApp.post('/courses/:courseId/lessons/:lessonId/video-status/sync', {
+      schema: {
+        tags: ['Courses - Learning'],
+        summary: 'Sync lesson video status for learner before playback',
+        params: z.object({
+          courseId: z.string().transform((val) => parseInt(val, 10)),
+          lessonId: z.string().transform((val) => parseInt(val, 10)),
+        }),
+      },
+      handler: coursesController.syncLearningLessonVideo,
+    });
+
     typedApp.patch('/lessons/:id/progress', {
       schema: {
         tags: ['Courses - Learning'],

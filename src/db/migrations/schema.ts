@@ -285,6 +285,7 @@ export const userLessonProgress = pgTable("user_lesson_progress", {
 			foreignColumns: [lessons.id],
 			name: "user_lesson_progress_lesson_id_lessons_id_fk"
 		}),
+	unique("user_lesson_progress_user_lesson_unique_idx").on(table.userId, table.lessonId),
 ]);
 
 export const userVideoAnswers = pgTable("user_video_answers", {

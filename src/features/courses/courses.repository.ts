@@ -504,7 +504,11 @@ export const coursesRepository = {
     return await this.attachCourseDetails(course);
   },
 
-  async getCourseForLearner(id: number, tx?: DbConnection) {
+  async getCourseForLearner(
+    id: number,
+    tx?: DbConnection,
+    options?: { includeExtendedDetails?: boolean },
+  ) {
     const conn = tx ?? db;
     const course = await conn.query.courses.findFirst({
       where: and(eq(courses.id, id), inArray(courses.status, [...LEARNER_ACCESSIBLE_COURSE_STATUSES])),
@@ -532,6 +536,10 @@ export const coursesRepository = {
 
     if (!course) {
       return null;
+    }
+
+    if (options?.includeExtendedDetails === false) {
+      return course;
     }
 
     return await this.attachCourseDetails(course, tx);
@@ -571,7 +579,10 @@ export const coursesRepository = {
       db
         .select({ count: count(enrollments.id) })
         .from(enrollments)
-        .where(eq(enrollments.courseId, id)),
+        .where(and(
+          eq(enrollments.courseId, id),
+          inArray(enrollments.status, ['ACTIVE', 'REFUND_PENDING']),
+        )),
       db
         .select({ count: count(certificates.id) })
         .from(certificates)
@@ -667,6 +678,10 @@ export const coursesRepository = {
       }
 
       await tx.delete(cartItems).where(eq(cartItems.courseId, id));
+      await tx.delete(enrollments).where(and(
+        eq(enrollments.courseId, id),
+        eq(enrollments.status, 'CANCELLED'),
+      ));
 
       const [deletedCourse] = await tx.delete(courses).where(eq(courses.id, id)).returning();
 

@@ -25,6 +25,21 @@ export async function registerJwt(app: FastifyInstance) {
       try {
         await request.jwtVerify();
         const user = request.user as { role?: string; isAdmin?: boolean };
+        const userRole = user.role || '';
+
+        if (allowedRoles.length > 0) {
+          if (!allowedRoles.includes(userRole)) {
+            return reply.status(403).send({
+              success: false,
+              statusCode: 403,
+              code: 'FORBIDDEN',
+              error: `Forbidden: requires role ${allowedRoles.join(' or ')}`,
+              message: `Forbidden: requires role ${allowedRoles.join(' or ')}`,
+            });
+          }
+
+          return;
+        }
 
         if (!user.isAdmin) {
           return reply.status(403).send({
@@ -33,16 +48,6 @@ export async function registerJwt(app: FastifyInstance) {
             code: 'FORBIDDEN',
             error: 'Forbidden: admin access required',
             message: 'Forbidden: admin access required',
-          });
-        }
-
-        if (allowedRoles.length > 0 && !allowedRoles.includes(user.role || '')) {
-          return reply.status(403).send({
-            success: false,
-            statusCode: 403,
-            code: 'FORBIDDEN',
-            error: `Forbidden: requires role ${allowedRoles.join(' or ')}`,
-            message: `Forbidden: requires role ${allowedRoles.join(' or ')}`,
           });
         }
       } catch (err) {

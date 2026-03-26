@@ -408,6 +408,19 @@ export const coursesController = {
     return reply.send({ data: progress });
   },
 
+  async syncLearningLessonVideo(
+    request: FastifyRequest<{ Params: { courseId: number; lessonId: number } }>,
+    reply: FastifyReply,
+  ) {
+    const video = await coursesService.syncLearningLessonVideo(
+      request.params.courseId,
+      request.params.lessonId,
+      getUserId(request),
+      getRequestUser(request),
+    );
+    return reply.send({ data: video });
+  },
+
   async getLessonQuiz(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
     const quiz = await coursesService.getLessonQuiz(request.params.id);
     return reply.send({ data: quiz });

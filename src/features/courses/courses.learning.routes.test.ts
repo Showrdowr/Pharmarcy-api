@@ -11,6 +11,7 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 
 const serviceMocks = vi.hoisted(() => ({
   getCourseLearning: vi.fn(),
+  syncLearningLessonVideo: vi.fn(),
   getLessonQuizRuntime: vi.fn(),
   addVideoQuestionsBulk: vi.fn(),
   answerVideoQuestion: vi.fn(),
@@ -43,6 +44,7 @@ async function createTestApp() {
 describe('courses learning routes', () => {
   beforeEach(() => {
     serviceMocks.getCourseLearning.mockReset();
+    serviceMocks.syncLearningLessonVideo.mockReset();
     serviceMocks.getLessonQuizRuntime.mockReset();
     serviceMocks.addVideoQuestionsBulk.mockReset();
     serviceMocks.answerVideoQuestion.mockReset();
@@ -140,6 +142,54 @@ describe('courses learning routes', () => {
     expect(body.data.lessons[0].progress).toMatchObject({
       lastWatchedSeconds: 125,
       isCompleted: false,
+    });
+
+    await app.close();
+  });
+
+  it('syncs lesson video status with the authenticated learner before playback', async () => {
+    const app = await createTestApp();
+    const token = app.jwt.sign({ id: 99, role: 'general' });
+
+    serviceMocks.syncLearningLessonVideo.mockResolvedValue({
+      lessonId: 1,
+      video: {
+        id: 5,
+        provider: 'VIMEO',
+        resourceId: '1175386748',
+        duration: 600,
+        name: 'ProjectPepsi',
+        status: 'FAILED',
+        playbackUrl: null,
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/courses/12/lessons/1/video-status/sync',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(serviceMocks.syncLearningLessonVideo).toHaveBeenCalledWith(
+      12,
+      1,
+      99,
+      expect.objectContaining({ id: 99, role: 'general' }),
+    );
+    expect(response.json().data).toEqual({
+      lessonId: 1,
+      video: {
+        id: 5,
+        provider: 'VIMEO',
+        resourceId: '1175386748',
+        duration: 600,
+        name: 'ProjectPepsi',
+        status: 'FAILED',
+        playbackUrl: null,
+      },
     });
 
     await app.close();
